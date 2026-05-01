@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #FAF9F7;
+  --orange: #F97316;
+  --orange-light: #FFF7ED;
+  --charcoal: #1A1A1A;
+  --gray: #6B7280;
+  --border: #E5E2DC;
+  --white: #FFFFFF;
+}
+
+body {
+  background: var(--bg);
+  color: var(--charcoal);
+}
+
+@keyframes scale-in {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+.animate-scale-in {
+  animation: scale-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
