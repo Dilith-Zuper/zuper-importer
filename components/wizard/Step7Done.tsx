@@ -2,7 +2,7 @@
 import { useWizardStore } from '@/store/wizard-store'
 
 export function Step7Done() {
-  const { companyName, uploadSummary, reset } = useWizardStore()
+  const { companyName, uploadSummary, selectedBrands, reset, setStep } = useWizardStore()
   const { uploaded, skipped, errors } = uploadSummary
 
   function downloadErrors() {
@@ -64,10 +64,16 @@ export function Step7Done() {
       )}
 
       <button
-        onClick={reset}
+        onClick={() => setStep(8)}
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
       >
-        Start New Import →
+        Build Proposal Templates →
+      </button>
+      <button
+        onClick={reset}
+        className="w-full h-12 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-base"
+      >
+        Start New Import
       </button>
     </div>
   )

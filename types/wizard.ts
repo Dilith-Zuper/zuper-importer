@@ -1,3 +1,18 @@
+export interface ProposalLineItem {
+  product_id: number
+  product_name: string
+  proposal_line_item: string
+  formula_key: string | null
+  suggested_price: number | null
+  family_tier: string | null
+}
+
+export interface BrandPackage {
+  good: ProposalLineItem[]
+  better: ProposalLineItem[]
+  best: ProposalLineItem[]
+}
+
 export interface TokenInfo {
   measurement_token_uid: string
   measurement_category_uid: string
@@ -16,7 +31,7 @@ export interface ValidationResult {
 }
 
 export interface WizardState {
-  step: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   // Step 1 — Connect
   companyLoginName: string
   apiKey: string
@@ -38,4 +53,6 @@ export interface WizardState {
   productTierFieldUid: string           // custom field UID for "Product Tier" RADIO
   // Step 6 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
+  // Step 8 — Proposal Templates
+  proposalPackages: Record<string, BrandPackage>  // brand → { good, better, best }
 }

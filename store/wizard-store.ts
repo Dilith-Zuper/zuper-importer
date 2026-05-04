@@ -1,6 +1,6 @@
 'use client'
 import { create } from 'zustand'
-import type { WizardState, ValidationResult, TokenInfo, UploadError } from '@/types/wizard'
+import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage } from '@/types/wizard'
 
 interface WizardStore extends WizardState {
   setStep: (step: WizardState['step']) => void
@@ -17,6 +17,7 @@ interface WizardStore extends WizardState {
     productTierFieldUid: string
   }) => void
   setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[] }) => void
+  setProposalPackages: (packages: Record<string, BrandPackage>) => void
   reset: () => void
 }
 
@@ -37,6 +38,7 @@ const initialState: WizardState = {
   tokenMap: {},
   formulaMap: {},
   uploadSummary: { uploaded: 0, skipped: 0, errors: [] },
+  proposalPackages: {},
 }
 
 export const useWizardStore = create<WizardStore>((set) => ({
@@ -65,6 +67,8 @@ export const useWizardStore = create<WizardStore>((set) => ({
   setValidationData: (data) => set({ ...data }),
 
   setUploadSummary: (summary) => set({ uploadSummary: summary, step: 7 }),
+
+  setProposalPackages: (packages) => set({ proposalPackages: packages }),
 
   reset: () => set(initialState),
 }))
