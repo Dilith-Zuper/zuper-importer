@@ -1,3 +1,5 @@
+export type Trade = 'roofing' | 'gutters' | 'siding'
+
 export interface ProposalLineItem {
   product_id: number
   product_name: string
@@ -31,29 +33,37 @@ export interface ValidationResult {
 }
 
 export interface WizardState {
-  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   // Step 1 — Connect
   companyLoginName: string
   apiKey: string
-  baseUrl: string   // dc_api_url + '/api/' — always ends with /api/
+  baseUrl: string
   companyName: string
-  // Step 2 — Brands
-  selectedBrands: string[]
-  // Step 3 — Product Lines
-  selectedProductLines: Record<string, string[]>  // { brand → [line, ...] }
-  // Step 4 — Preview
+  // Step 2 — Trades
+  selectedTrades: Trade[]
+  // Step 3 — Brands (per trade)
+  selectedBrands: string[]                         // roofing
+  selectedGutterBrands: string[]
+  selectedSidingBrands: string[]
+  // Step 4 — Product Lines (per trade)
+  selectedProductLines: Record<string, string[]>   // roofing: { brand → lines }
+  selectedGutterProductLines: Record<string, string[]>
+  selectedSidingProductLines: Record<string, string[]>
+  // Step 5 — Preview
   filteredProductIds: number[]
   productCounts: { total: number; byCategory: Record<string, number> }
-  // Step 5 — Validate
+  // Step 6 — Validate
   validationResults: ValidationResult[]
-  categoryMap: Record<string, string>   // srs_category → zuper category_uid
+  categoryMap: Record<string, string>
   warehouseUid: string
-  tokenMap: Record<string, TokenInfo>   // token_name → { uid, category_uid }
-  formulaMap: Record<string, string>    // formula_key → formula_uid
-  productTierFieldUid: string           // custom field UID for "Product Tier" RADIO
-  // Step 6 — Upload
+  tokenMap: Record<string, TokenInfo>
+  formulaMap: Record<string, string>
+  productTierFieldUid: string
+  // Step 7 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
-  productIdMap: Record<string, string>  // srs_product_id → zuper product_uid
-  // Step 8 — Proposal Templates
-  proposalPackages: Record<string, BrandPackage>  // brand → { good, better, best }
+  productIdMap: Record<string, string>
+  // Step 9 — Proposal Templates
+  proposalPackages: Record<string, BrandPackage>
+  gutterProposalItems: ProposalLineItem[]
+  sidingProposalItems: ProposalLineItem[]
 }

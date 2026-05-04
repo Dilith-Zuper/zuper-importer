@@ -68,7 +68,12 @@ interface Product {
 }
 
 export function Step4Preview() {
-  const { selectedBrands, selectedProductLines, companyName, setPreview, setStep } = useWizardStore()
+  const {
+    selectedBrands, selectedProductLines, companyName, setPreview, setStep,
+    selectedTrades,
+    selectedGutterBrands, selectedGutterProductLines,
+    selectedSidingBrands, selectedSidingProductLines,
+  } = useWizardStore()
   const [products, setProducts] = useState<Product[]>([])
   const [counts, setCounts] = useState<{ total: number; byCategory: Record<string, number> }>({ total: 0, byCategory: {} })
   const [activeBrand, setActiveBrand] = useState<string>('all')
@@ -78,13 +83,18 @@ export function Step4Preview() {
     fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedBrands, selectedProductLines }),
+      body: JSON.stringify({
+        selectedBrands, selectedProductLines,
+        selectedTrades,
+        selectedGutterBrands, selectedGutterProductLines,
+        selectedSidingBrands, selectedSidingProductLines,
+      }),
     }).then(r => r.json()).then(d => {
       setProducts(d.products ?? [])
       setCounts(d.counts ?? { total: 0, byCategory: {} })
       setLoading(false)
     })
-  }, [selectedBrands, selectedProductLines])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const brandCounts: Record<string, number> = {}
   for (const p of products) {
@@ -188,7 +198,7 @@ export function Step4Preview() {
         Confirm &amp; Run Pre-flight Checks →
       </button>
 
-      <button onClick={() => setStep(3)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+      <button onClick={() => setStep(4)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
         ← Back to brand selection
       </button>
     </div>

@@ -1,25 +1,26 @@
 'use client'
 import { useWizardStore } from '@/store/wizard-store'
-import { Step1Connect } from './Step1Connect'
-import { Step2Brands }  from './Step2Brands'
-import { Step3ProductLines } from './Step3ProductLines'
-import { Step4Preview } from './Step4Preview'
-import { Step5Validate } from './Step5Validate'
-import { Step6Upload }  from './Step6Upload'
-import { Step7Done }    from './Step7Done'
-import { Step8Proposals } from './Step8Proposals'
+import { Step1Connect }      from './Step1Connect'
+import { Step2Trades }       from './Step2Trades'
+import { Step3Brands }       from './Step3Brands'
+import { Step4ProductLines } from './Step4ProductLines'
+import { Step4Preview }      from './Step4Preview'
+import { Step5Validate }     from './Step5Validate'
+import { Step6Upload }       from './Step6Upload'
+import { Step7Done }         from './Step7Done'
+import { Step9Proposals }    from './Step9Proposals'
 
 const STEPS = [
-  { label: 'Connect',   short: 'Connect'   },
-  { label: 'Brands',    short: 'Brands'    },
-  { label: 'Lines',     short: 'Lines'     },
-  { label: 'Preview',   short: 'Preview'   },
-  { label: 'Validate',  short: 'Validate'  },
-  { label: 'Upload',    short: 'Upload'    },
-  { label: 'Done',      short: 'Done'      },
-  { label: 'Templates', short: 'Templates' },
+  { label: 'Connect',   short: 'Connect'  },
+  { label: 'Trades',    short: 'Trades'   },
+  { label: 'Brands',    short: 'Brands'   },
+  { label: 'Lines',     short: 'Lines'    },
+  { label: 'Preview',   short: 'Preview'  },
+  { label: 'Validate',  short: 'Validate' },
+  { label: 'Upload',    short: 'Upload'   },
+  { label: 'Done',      short: 'Done'     },
+  { label: 'Templates', short: 'Templates'},
 ]
-
 
 export function WizardShell() {
   const { step } = useWizardStore()
@@ -48,7 +49,7 @@ export function WizardShell() {
           <div className="flex items-center justify-between">
             {STEPS.map((s, i) => {
               const n = i + 1
-              const done = step > n
+              const done   = step > n
               const active = step === n
               return (
                 <div key={s.label} className="flex items-center flex-1">
@@ -82,13 +83,14 @@ export function WizardShell() {
       {/* Content */}
       <main className="max-w-[760px] mx-auto px-6 py-12">
         {step === 1 && <Step1Connect />}
-        {step === 2 && <Step2Brands />}
-        {step === 3 && <Step3ProductLines />}
-        {step === 4 && <Step4Preview />}
-        {step === 5 && <Step5Validate />}
-        {step === 6 && <Step6Upload />}
-        {step === 7 && <Step7Done />}
-        {step === 8 && <Step8Proposals />}
+        {step === 2 && <Step2Trades />}
+        {step === 3 && <Step3Brands />}
+        {step === 4 && <Step4ProductLines />}
+        {step === 5 && <Step4Preview />}
+        {step === 6 && <Step5Validate />}
+        {step === 7 && <Step6Upload />}
+        {step === 8 && <Step7Done />}
+        {step === 9 && <Step9Proposals />}
       </main>
     </div>
   )

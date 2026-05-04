@@ -126,7 +126,7 @@ export function Step5Validate() {
             ✓ All checks passed — Ready to import {filteredProductIds.length.toLocaleString()} products to {companyName}
           </div>
           <button
-            onClick={() => setStep(6)}
+            onClick={() => setStep(7)}
             className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
           >
             Begin Upload →

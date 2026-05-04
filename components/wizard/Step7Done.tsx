@@ -64,7 +64,7 @@ export function Step7Done() {
       )}
 
       <button
-        onClick={() => setStep(8)}
+        onClick={() => setStep(9)}
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
       >
         Build Proposal Templates →

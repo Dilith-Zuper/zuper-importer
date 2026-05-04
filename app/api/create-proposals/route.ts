@@ -13,12 +13,14 @@ interface CreateInput {
   layoutTemplateUid: string
   formulaMap: Record<string, string>
   productIdMap: Record<string, string>
+  gutterItems: ProposalLineItem[]
+  sidingItems: ProposalLineItem[]
   packages: { brand: string; templateName: string; templateDescription: string; pkg: BrandPackage }[]
 }
 
 export async function POST(req: NextRequest) {
   const input: CreateInput = await req.json()
-  const { baseUrl, apiKey, categoryUid, statusUid, layoutTemplateUid, formulaMap, productIdMap, packages } = input
+  const { baseUrl, apiKey, categoryUid, statusUid, layoutTemplateUid, formulaMap, productIdMap, gutterItems, sidingItems, packages } = input
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -184,6 +186,54 @@ export async function POST(req: NextRequest) {
                     },
                   }),
                 })
+              }
+            }
+          }
+
+          // ── Gutter and Siding sections (same items in all 3 options) ──────
+          const extraSections: { label: string; items: ProposalLineItem[] }[] = []
+          if (gutterItems?.length) extraSections.push({ label: 'Gutter Materials', items: gutterItems })
+          if (sidingItems?.length)  extraSections.push({ label: 'Siding Materials',  items: sidingItems })
+
+          for (const { label, items } of extraSections) {
+            for (const opt of options) {
+              const sectionUrl = `${baseUrl}invoice_estimate/proposal_template/${templateUid}/options/${opt.option_uid}/line_items?items_type=LINE_ITEMS`
+
+              const hdr = await fetchWithRetry(sectionUrl, {
+                method: 'POST',
+                headers: zuperHeaders(apiKey),
+                body: JSON.stringify({ line_item: { type: 'HEADER', line_item_type: 'HEADER', product_name: label, section_type: 'EXPANDED', show_section_total: false, show_child_prices: true } }),
+              })
+              const hd2 = hdr.json?.data
+              const hdItem2 = Array.isArray(hd2) ? hd2[0] : hd2
+              const secUid: string = hdItem2?.section_uid ?? hdItem2?.line_item_uid ?? hdItem2?.uid ?? ''
+
+              emit({ brand, status: 'running', step: `Adding ${items.length} items to ${opt.option_name} — ${label}…` })
+
+              for (const item of items) {
+                const zuperProductUid = productIdMap[String(item.product_id)]
+                if (!zuperProductUid) continue
+                const formulaUid = item.formula_key ? liveFormulaMap[item.formula_key] : undefined
+                const itemRes = await fetchWithRetry(sectionUrl, {
+                  method: 'POST',
+                  headers: zuperHeaders(apiKey),
+                  body: JSON.stringify({
+                    line_item: {
+                      type: 'ITEM', line_item_type: 'ITEM',
+                      product_name: item.product_name, product: zuperProductUid,
+                      product_type: 'PARTS', quantity: 1,
+                      ...(formulaUid ? { quantity_type: 'FORMULA', formula: formulaUid } : { quantity_type: 'FIXED' }),
+                      ...(secUid ? { section_uid: secUid, section_name: label } : {}),
+                    },
+                  }),
+                })
+                if (!itemRes.ok && formulaUid) {
+                  await fetchWithRetry(sectionUrl, {
+                    method: 'POST',
+                    headers: zuperHeaders(apiKey),
+                    body: JSON.stringify({ line_item: { type: 'ITEM', line_item_type: 'ITEM', product_name: item.product_name, product: zuperProductUid, product_type: 'PARTS', quantity: 1, quantity_type: 'FIXED', ...(secUid ? { section_uid: secUid, section_name: label } : {}) } }),
+                  })
+                }
               }
             }
           }

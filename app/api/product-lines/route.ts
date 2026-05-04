@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+const TRADE_CATEGORY: Record<string, string> = {
+  gutters: 'GUTTER/ALUMINUM/COIL',
+  siding:  'SIDING',
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { selectedBrands } = await req.json() as { selectedBrands: string[] }
+    const { selectedBrands, trade = 'roofing' } = await req.json() as {
+      selectedBrands: string[]
+      trade?: string
+    }
 
     const result: Record<string, { line: string; count: number }[]> = {}
 
@@ -13,13 +21,18 @@ export async function POST(req: NextRequest) {
       const PAGE = 1000
 
       while (true) {
-        const { data, error } = await supabase
+        let query = supabase
           .from('srs_products')
           .select('product_line')
           .eq('manufacturer_norm', brand)
           .eq('exclude_default', false)
-          .range(from, from + PAGE - 1)
 
+        // For gutters/siding, also filter to that category
+        if (trade !== 'roofing' && TRADE_CATEGORY[trade]) {
+          query = query.eq('product_category', TRADE_CATEGORY[trade])
+        }
+
+        const { data, error } = await query.range(from, from + PAGE - 1)
         if (error) throw new Error(error.message)
 
         for (const row of data) {
