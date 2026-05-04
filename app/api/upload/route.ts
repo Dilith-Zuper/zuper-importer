@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
 
         let uploaded = 0
         const errors: { productId: number; productName: string; message: string }[] = []
+        const productIdMap: Record<string, string> = {}
         const batches = chunks(allProducts, 100)
 
         for (const [i, batch] of Array.from(batches.entries())) {
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest) {
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
                 uploaded++
+                const zuperUid = r.json?.data?.product_uid ?? ''
+                if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
                 emit({ type: 'progress', status: 'success', productName: product.product_name, uploaded, total: allProducts.length })
               } else {
                 const msg = r.json?.message ?? JSON.stringify(r.json)
@@ -96,7 +99,7 @@ export async function POST(req: NextRequest) {
           if (i < batches.length - 1) await sleep(3000)
         }
 
-        emit({ type: 'done', uploaded, skipped: 0, errors })
+        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, uploaded: 0, skipped: 0, errors: [] })

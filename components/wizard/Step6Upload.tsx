@@ -59,7 +59,7 @@ export function Step6Upload() {
               setDone(true)
               const errs = data.errors ?? []
               setErrors(errs)
-              setUploadSummary({ uploaded: data.uploaded ?? 0, skipped: data.skipped ?? 0, errors: errs })
+              setUploadSummary({ uploaded: data.uploaded ?? 0, skipped: data.skipped ?? 0, errors: errs, productIdMap: data.productIdMap ?? {} })
             }
           }
         }

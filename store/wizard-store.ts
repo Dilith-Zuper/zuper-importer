@@ -16,7 +16,7 @@ interface WizardStore extends WizardState {
     formulaMap: Record<string, string>
     productTierFieldUid: string
   }) => void
-  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[] }) => void
+  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[]; productIdMap: Record<string, string> }) => void
   setProposalPackages: (packages: Record<string, BrandPackage>) => void
   reset: () => void
 }
@@ -38,6 +38,7 @@ const initialState: WizardState = {
   tokenMap: {},
   formulaMap: {},
   uploadSummary: { uploaded: 0, skipped: 0, errors: [] },
+  productIdMap: {},
   proposalPackages: {},
 }
 
@@ -66,7 +67,7 @@ export const useWizardStore = create<WizardStore>((set) => ({
 
   setValidationData: (data) => set({ ...data }),
 
-  setUploadSummary: (summary) => set({ uploadSummary: summary, step: 7 }),
+  setUploadSummary: ({ productIdMap, ...summary }) => set({ uploadSummary: summary, productIdMap, step: 7 }),
 
   setProposalPackages: (packages) => set({ proposalPackages: packages }),
 

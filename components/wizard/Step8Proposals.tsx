@@ -3,164 +3,342 @@ import { useEffect, useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
 import type { BrandPackage, ProposalLineItem } from '@/types/wizard'
 
-const TIER_LABELS = { good: 'Good', better: 'Better', best: 'Best' } as const
-const TIER_COLORS = {
-  good:   { bg: 'bg-gray-50',    border: 'border-gray-200',   badge: 'bg-gray-100 text-gray-600',   heading: 'text-gray-700' },
-  better: { bg: 'bg-orange-50',  border: 'border-orange-200', badge: 'bg-orange-100 text-orange-600', heading: 'text-orange-700' },
-  best:   { bg: 'bg-amber-50',   border: 'border-amber-300',  badge: 'bg-amber-100 text-amber-700',   heading: 'text-amber-800' },
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface PreflightState {
+  categoryUid: string
+  categoryName: string
+  statusUid: string
+  statusName: string
+  layoutUid: string
+  layoutName: string
 }
 
-function LineItemRow({ item, isShingles }: { item: ProposalLineItem; isShingles: boolean }) {
+type Phase = 'preflight' | 'preview' | 'creating' | 'done'
+
+const TIER_LABELS = { good: 'Good', better: 'Better', best: 'Best' } as const
+const TIER_BORDER = { good: 'border-gray-200', better: 'border-orange-300', best: 'border-amber-400' }
+const TIER_HEADING = { good: 'text-gray-600', better: 'text-orange-600', best: 'text-amber-700' }
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function Spinner() {
+  return <div className="w-4 h-4 rounded-full border-2 border-orange-500 border-t-transparent animate-spin flex-shrink-0" />
+}
+
+function PickerModal({ title, items, onPick }: {
+  title: string
+  items: { uid: string; name: string }[]
+  onPick: (uid: string, name: string) => void
+}) {
   return (
-    <div className={`flex items-center justify-between py-2 px-3 rounded-lg ${isShingles ? 'bg-orange-50 border border-orange-200' : ''}`}>
-      <div className="min-w-0 flex-1">
-        <p className={`text-xs font-semibold ${isShingles ? 'text-orange-600' : 'text-gray-400'} uppercase tracking-wide`}>
-          {item.proposal_line_item}
-        </p>
-        <p className="text-sm text-gray-800 font-medium truncate">{item.product_name}</p>
+    <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-2">
+      <p className="text-sm font-semibold text-amber-800">{title}</p>
+      <div className="space-y-1 max-h-40 overflow-y-auto">
+        {items.map(item => (
+          <button key={item.uid} onClick={() => onPick(item.uid, item.name)}
+            className="w-full text-left px-3 py-2 text-sm bg-white border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors">
+            {item.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LineItemRow({ item }: { item: ProposalLineItem }) {
+  const isShingles = item.proposal_line_item === 'Shingles'
+  return (
+    <div className={`flex items-start gap-2 py-1.5 px-2 rounded-lg ${isShingles ? 'bg-orange-50' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isShingles ? 'text-orange-400' : 'text-gray-400'}`}>{item.proposal_line_item}</p>
+        <p className="text-xs text-gray-800 font-medium leading-tight truncate">{item.product_name}</p>
       </div>
       {item.suggested_price != null && (
-        <span className="text-xs text-gray-400 ml-2 flex-shrink-0">${item.suggested_price.toLocaleString()}</span>
+        <span className="text-[10px] text-gray-400 flex-shrink-0 mt-1">${item.suggested_price}</span>
       )}
     </div>
   )
 }
 
-function PackageCard({ tier, items }: { tier: keyof typeof TIER_LABELS; items: ProposalLineItem[] }) {
-  const c = TIER_COLORS[tier]
-  const shingles = items.find(i => i.proposal_line_item === 'Shingles')
-  return (
-    <div className={`rounded-2xl border ${c.border} ${c.bg} p-4 space-y-2 flex-1`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className={`text-sm font-bold ${c.heading}`}>{TIER_LABELS[tier]}</span>
-        {shingles?.suggested_price != null && (
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c.badge}`}>
-            ~${shingles.suggested_price}/sq
-          </span>
-        )}
-      </div>
-      <div className="space-y-1">
-        {items.map((item, i) => (
-          <LineItemRow key={i} item={item} isShingles={item.proposal_line_item === 'Shingles'} />
-        ))}
-      </div>
-    </div>
-  )
-}
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export function Step8Proposals() {
-  const { selectedBrands, companyName, proposalPackages, setProposalPackages, setStep, reset } = useWizardStore()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [activeBrands, setActiveBrands] = useState<Set<string>>(new Set())
+  const {
+    selectedBrands, selectedProductLines, companyName,
+    proposalPackages, setProposalPackages,
+    formulaMap, productIdMap,
+    setStep, reset,
+    baseUrl, apiKey,
+  } = useWizardStore()
+
+  const [phase, setPhase] = useState<Phase>('preflight')
+  const [preflightLoading, setPreflightLoading] = useState(true)
+  const [preflight, setPreflight] = useState<Partial<PreflightState>>({})
+
+  // Picker state (when auto-detect fails)
+  const [categoryOptions, setCategoryOptions] = useState<{ uid: string; name: string }[]>([])
+  const [statusOptions, setStatusOptions]     = useState<{ uid: string; name: string }[]>([])
+  const [layoutOptions, setLayoutOptions]     = useState<{ uid: string; name: string }[]>([])
+
+  // Package state
+  const [packageLoading, setPackageLoading] = useState(false)
+  const [templateNames, setTemplateNames] = useState<Record<string, string>>({})
+  const [templateDescs, setTemplateDescs] = useState<Record<string, string>>({})
+  const [activeBrands, setActiveBrands]   = useState<Set<string>>(new Set())
+
+  // Creation state
+  const [creationLog, setCreationLog] = useState<{ brand: string; status: string; msg?: string }[]>([])
+  const [creationDone, setCreationDone] = useState(false)
+
+  // ── Phase A: Pre-flight ────────────────────────────────────────────────────
+
+  useEffect(() => { runPreflight() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function runPreflight(overrideCategoryUid?: string) {
+    setPreflightLoading(true)
+    try {
+      const d = await fetch('/api/proposal-preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl, apiKey, categoryUid: overrideCategoryUid }),
+      }).then(r => r.json())
+
+      setPreflight({
+        categoryUid:  d.categoryUid  || undefined,
+        categoryName: d.categoryName || undefined,
+        statusUid:    d.statusUid    || undefined,
+        statusName:   d.statusName   || undefined,
+        layoutUid:    d.layoutUid    || undefined,
+        layoutName:   d.layoutName   || undefined,
+      })
+      if (d.categoryOptions?.length) setCategoryOptions(d.categoryOptions)
+      if (d.statusOptions?.length)   setStatusOptions(d.statusOptions)
+      if (d.layoutOptions?.length)   setLayoutOptions(d.layoutOptions)
+    } catch { /* network error — pickers stay empty */ }
+    setPreflightLoading(false)
+  }
+
+  const allPreflightReady = !!(preflight.categoryUid && preflight.statusUid && preflight.layoutUid)
 
   useEffect(() => {
-    fetch('/api/proposal-preview', {
+    if (allPreflightReady && phase === 'preflight') loadPackages()
+  }, [preflight]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Phase B: Load packages ─────────────────────────────────────────────────
+
+  async function loadPackages() {
+    setPackageLoading(true)
+    setPhase('preview')
+    const d: Record<string, BrandPackage> & { error?: string } = await fetch('/api/proposal-preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedBrands }),
-    })
-      .then(r => r.json())
-      .then((d: Record<string, BrandPackage> & { error?: string }) => {
-        if (d.error) { setError(d.error); return }
-        setProposalPackages(d)
-        setActiveBrands(new Set(Object.keys(d)))
-        setLoading(false)
+      body: JSON.stringify({ selectedBrands, selectedProductLines }),
+    }).then(r => r.json())
+
+    if (!d.error) {
+      setProposalPackages(d)
+      const brands = Object.keys(d)
+      setActiveBrands(new Set(brands))
+      const names: Record<string, string> = {}
+      const descs: Record<string, string> = {}
+      brands.forEach(b => {
+        names[b] = `${b} Roofing Proposal`
+        descs[b] = `Good / Better / Best roofing package for ${b} products`
       })
-      .catch(e => { setError(e.message); setLoading(false) })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+      setTemplateNames(names)
+      setTemplateDescs(descs)
+    }
+    setPackageLoading(false)
+  }
+
+  // ── Phase C: Create templates ─────────────────────────────────────────────
+
+  async function createTemplates() {
+    setPhase('creating')
+    const pkgList = Array.from(activeBrands)
+      .filter(b => proposalPackages[b])
+      .map(b => ({
+        brand: b,
+        templateName: templateNames[b] ?? `${b} Roofing Proposal`,
+        templateDescription: templateDescs[b] ?? '',
+        pkg: proposalPackages[b],
+      }))
+
+    const response = await fetch('/api/create-proposals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl, apiKey,
+        categoryUid:       preflight.categoryUid,
+        statusUid:         preflight.statusUid,
+        layoutTemplateUid: preflight.layoutUid,
+        formulaMap,
+        productIdMap,
+        packages: pkgList,
+      }),
+    })
+
+    if (!response.body) return
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const ev = JSON.parse(line.slice(6))
+        if (ev.type === 'complete') { setCreationDone(true); setPhase('done') }
+        else setCreationLog(prev => [...prev, { brand: ev.brand, status: ev.status, msg: ev.message ?? ev.step }])
+      }
+    }
+  }
+
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   const eligibleBrands = Object.keys(proposalPackages)
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-20">
-      <div className="w-8 h-8 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" />
-    </div>
-  )
-
-  if (error) return (
-    <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700 text-sm">{error}</div>
-  )
-
-  if (eligibleBrands.length === 0) return (
-    <div className="max-w-md mx-auto text-center space-y-4 py-12">
-      <p className="text-gray-500">None of the imported brands have enough tier data for Good / Better / Best templates.</p>
-      <button onClick={reset} className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors">
-        Start New Import →
-      </button>
-    </div>
-  )
-
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h2 className="text-[32px] font-extrabold text-[#1A1A1A] leading-tight">Proposal Templates</h2>
         <p className="text-gray-500 mt-2">
-          Good / Better / Best packages for <span className="font-medium text-orange-500">{companyName}</span>.{' '}
-          {eligibleBrands.length} brand{eligibleBrands.length > 1 ? 's' : ''} eligible.
+          Building Good / Better / Best CPQ templates for{' '}
+          <span className="font-medium text-orange-500">{companyName}</span>
         </p>
       </div>
 
-      {/* Brand selector */}
-      <div className="flex flex-wrap gap-2">
-        {eligibleBrands.map(brand => (
-          <button
-            key={brand}
-            onClick={() => setActiveBrands(s => {
-              const next = new Set(s)
-              next.has(brand) ? next.delete(brand) : next.add(brand)
-              return next
-            })}
-            className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
-              activeBrands.has(brand)
-                ? 'bg-orange-500 text-white border-orange-500'
-                : 'bg-white text-gray-500 border-[#E5E2DC] hover:border-gray-400'
-            }`}
-          >
-            {brand}
-          </button>
+      {/* ── Pre-flight checks ── */}
+      <div className="bg-white rounded-2xl border border-[#E5E2DC] divide-y divide-[#E5E2DC]">
+        {[
+          { key: 'category', label: 'Roof Inspection job category', value: preflight.categoryName, uid: preflight.categoryUid },
+          { key: 'status',   label: '"Create Proposal" job status', value: preflight.statusName,   uid: preflight.statusUid },
+          { key: 'layout',   label: 'Residential Roofing Proposal layout', value: preflight.layoutName, uid: preflight.layoutUid },
+        ].map(item => (
+          <div key={item.key} className="flex items-center gap-4 px-5 py-4">
+            {preflightLoading && !item.uid
+              ? <Spinner />
+              : item.uid
+              ? <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+              : <div className="w-6 h-6 rounded-full border-2 border-amber-400 flex-shrink-0" />
+            }
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{item.label}</p>
+              <p className="text-xs text-gray-400">{item.value ?? (preflightLoading ? 'Checking…' : 'Not found — pick below')}</p>
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* Package previews per brand */}
-      {eligibleBrands.filter(b => activeBrands.has(b)).map(brand => {
-        const pkg = proposalPackages[brand]
-        return (
-          <div key={brand} className="bg-white rounded-2xl border border-[#E5E2DC] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#E5E2DC]">
-              <p className="font-bold text-gray-900">{brand}</p>
-              <p className="text-xs text-gray-400 mt-0.5">3 estimate templates will be created in Zuper</p>
-            </div>
-            <div className="p-4 flex gap-3">
-              <PackageCard tier="good"   items={pkg.good}   />
-              <PackageCard tier="better" items={pkg.better} />
-              <PackageCard tier="best"   items={pkg.best}   />
-            </div>
-          </div>
-        )
-      })}
+      {/* Pickers */}
+      {!preflight.categoryUid && categoryOptions.length > 0 && (
+        <PickerModal title="Select the job category to trigger proposals from:" items={categoryOptions}
+          onPick={(uid) => { setStatusOptions([]); runPreflight(uid) }}
+        />
+      )}
+      {preflight.categoryUid && !preflight.statusUid && statusOptions.length > 0 && (
+        <PickerModal title='Select the job status that should trigger "Create Proposal":' items={statusOptions}
+          onPick={(uid, name) => setPreflight(p => ({ ...p, statusUid: uid, statusName: name }))} />
+      )}
+      {!preflight.layoutUid && layoutOptions.length > 0 && (
+        <PickerModal title="Select the proposal layout template to use:" items={layoutOptions}
+          onPick={(uid, name) => setPreflight(p => ({ ...p, layoutUid: uid, layoutName: name }))} />
+      )}
 
-      {/* Coming soon note */}
-      <div className="bg-orange-50 border border-orange-200 rounded-2xl px-5 py-4 text-sm text-orange-800">
-        <p className="font-semibold">Template creation coming soon</p>
-        <p className="mt-1 text-orange-700">The Zuper estimate template endpoint is being configured. Once available, clicking "Create in Zuper" will push these packages as estimate templates to the account.</p>
-      </div>
+      {/* ── Package preview ── */}
+      {phase !== 'preflight' && (
+        <>
+          {packageLoading ? (
+            <div className="flex items-center gap-3 text-gray-500 text-sm"><Spinner /> Loading packages…</div>
+          ) : eligibleBrands.length === 0 ? (
+            <p className="text-gray-500 text-sm">No eligible brands found within selected product lines.</p>
+          ) : (
+            <>
+              {/* Brand filter */}
+              <div className="flex flex-wrap gap-2">
+                {eligibleBrands.map(b => (
+                  <button key={b} onClick={() => setActiveBrands(s => { const n = new Set(s); n.has(b) ? n.delete(b) : n.add(b); return n })}
+                    className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${activeBrands.has(b) ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-500 border-[#E5E2DC] hover:border-gray-400'}`}>
+                    {b}
+                  </button>
+                ))}
+              </div>
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => setStep(7)}
-          className="flex-1 h-12 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors"
-        >
-          ← Back
-        </button>
-        <button
-          onClick={reset}
-          className="flex-1 h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors"
-        >
-          Start New Import →
-        </button>
-      </div>
+              {/* Package cards */}
+              {eligibleBrands.filter(b => activeBrands.has(b)).map(brand => {
+                const pkg = proposalPackages[brand]
+                return (
+                  <div key={brand} className="bg-white rounded-2xl border border-[#E5E2DC] overflow-hidden">
+                    <div className="px-5 py-4 border-b border-[#E5E2DC] space-y-3">
+                      <p className="font-bold text-gray-900">{brand}</p>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">Template name</label>
+                          <input value={templateNames[brand] ?? ''} onChange={e => setTemplateNames(n => ({ ...n, [brand]: e.target.value }))}
+                            className="w-full mt-1 text-sm border border-[#E5E2DC] rounded-lg px-3 py-2 focus:outline-none focus:border-orange-400" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">Description</label>
+                          <input value={templateDescs[brand] ?? ''} onChange={e => setTemplateDescs(n => ({ ...n, [brand]: e.target.value }))}
+                            className="w-full mt-1 text-sm border border-[#E5E2DC] rounded-lg px-3 py-2 focus:outline-none focus:border-orange-400" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-4 grid grid-cols-3 gap-3">
+                      {(['good', 'better', 'best'] as const).map(tier => (
+                        <div key={tier} className={`rounded-xl border ${TIER_BORDER[tier]} p-3 space-y-1`}>
+                          <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${TIER_HEADING[tier]}`}>{TIER_LABELS[tier]}</p>
+                          {pkg[tier].map((item, i) => <LineItemRow key={i} item={item} />)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
+
+          {/* ── Creation progress ── */}
+          {phase === 'creating' && (
+            <div className="bg-[#1C1917] rounded-2xl p-4 space-y-1 font-mono text-xs">
+              {creationLog.map((entry, i) => (
+                <div key={i} className={entry.status === 'done' ? 'text-green-400' : entry.status === 'error' ? 'text-red-400' : 'text-orange-400'}>
+                  {entry.status === 'done' ? '✓' : entry.status === 'error' ? '✗' : '⟳'} {entry.brand} — {entry.msg}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Action buttons ── */}
+          {phase === 'preview' && allPreflightReady && eligibleBrands.length > 0 && activeBrands.size > 0 && (
+            <button onClick={createTemplates}
+              className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors">
+              Create Templates in Zuper →
+            </button>
+          )}
+
+          {phase === 'done' && (
+            <div className="space-y-3">
+              <div className="bg-green-50 border border-green-200 rounded-2xl px-5 py-4 text-sm text-green-700 font-semibold text-center">
+                ✓ {creationLog.filter(e => e.status === 'done').length} templates created in Zuper
+              </div>
+              <button onClick={reset} className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors">
+                Start New Import →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      <button onClick={() => setStep(7)} className="w-full text-sm text-gray-400 hover:text-gray-600 text-center transition-colors">
+        ← Back to Done
+      </button>
     </div>
   )
 }

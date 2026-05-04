@@ -53,6 +53,7 @@ export interface WizardState {
   productTierFieldUid: string           // custom field UID for "Product Tier" RADIO
   // Step 6 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
+  productIdMap: Record<string, string>  // srs_product_id → zuper product_uid
   // Step 8 — Proposal Templates
   proposalPackages: Record<string, BrandPackage>  // brand → { good, better, best }
 }

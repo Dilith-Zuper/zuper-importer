@@ -5,68 +5,62 @@ import { normalizeCategory } from '@/lib/category-norm'
 import type { ProposalLineItem, BrandPackage } from '@/types/wizard'
 
 const CPQ_CATEGORIES = ['SHINGLES', 'HIP AND RIDGE', 'STARTER', 'UNDERLAYMENT', 'ICE AND WATER', 'VENTS']
-const CPQ_PROPOSAL_ITEMS = ['Shingles', 'Hip & Ridge Cap', 'Starter Strip', 'Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']
-const UNIVERSAL_ITEMS = ['Drip Edge', 'Coil Nails', 'Fasteners']
+const CPQ_COMPONENTS = ['Shingles', 'Hip & Ridge Cap', 'Starter Strip', 'Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']
+const UNIVERSAL_COMPONENTS = ['Drip Edge', 'Coil Nails', 'Fasteners']
 const UNIVERSAL_CATEGORIES = ['DRIP EDGE', 'COIL NAILS', 'OTHER FASTENERS']
 
-// Tier fallback chain per component
-function pickProduct(
-  products: { tier: string; items: ProposalLineItem[] }[],
-  tierPrefs: string[]
-): ProposalLineItem | null {
+function pickProduct(byTier: Record<string, ProposalLineItem[]>, tierPrefs: string[]): ProposalLineItem | null {
   for (const tier of tierPrefs) {
-    const group = products.find(p => p.tier === tier)
-    if (group && group.items.length > 0) {
-      return group.items.find(i => i.family_tier !== null) ?? group.items[0]
-    }
+    const items = byTier[tier]
+    if (items?.length) return items[0]
   }
   return null
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { selectedBrands } = await req.json() as { selectedBrands: string[] }
+    const { selectedBrands, selectedProductLines } = await req.json() as {
+      selectedBrands: string[]
+      selectedProductLines: Record<string, string[]>
+    }
 
     const result: Record<string, BrandPackage> = {}
 
     for (const brand of selectedBrands) {
-      // Fetch all CPQ-relevant products for this brand
-      const { data: brandProducts } = await supabase
+      const allowedLines = selectedProductLines[brand] ?? []
+
+      const query = supabase
         .from('srs_products')
-        .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, is_universal')
+        .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, product_line')
         .eq('manufacturer_norm', brand)
         .eq('exclude_default', false)
         .in('product_category', CPQ_CATEGORIES)
-        .limit(500)
 
+      // Filter to selected product lines if provided
+      if (allowedLines.length > 0) {
+        query.in('product_line', allowedLines)
+      }
+
+      const { data: brandProducts } = await query.limit(500)
       if (!brandProducts?.length) continue
 
-      // Check if brand has shingles in 2+ tiers — only eligible brands get packages
+      // Check eligibility: shingles must exist in 2+ tiers (within selected lines)
       const shingleTiers = new Set(
         brandProducts
           .filter(p => p.product_category === 'SHINGLES' || p.proposal_line_item === 'Shingles')
-          .map(p => p.family_tier)
-          .filter(Boolean)
+          .map(p => p.family_tier).filter(Boolean)
       )
       if (shingleTiers.size < 2) continue
 
-      // Group by normalized component + tier
-      const byComponent: Record<string, { tier: string; items: ProposalLineItem[] }[]> = {}
-
+      // Group by component → tier → items (primary_item first)
+      const byCompTier: Record<string, Record<string, ProposalLineItem[]>> = {}
       for (const p of brandProducts) {
         const comp = normalizeCategory(p.proposal_line_item, p.product_category)
-        if (!CPQ_PROPOSAL_ITEMS.includes(comp)) continue
-
+        if (!CPQ_COMPONENTS.includes(comp)) continue
         const tier = p.family_tier ?? 'null'
-        if (!byComponent[comp]) byComponent[comp] = []
-
-        let group = byComponent[comp].find(g => g.tier === tier)
-        if (!group) {
-          group = { tier, items: [] }
-          byComponent[comp].push(group)
-        }
-
-        group.items.push({
+        if (!byCompTier[comp]) byCompTier[comp] = {}
+        if (!byCompTier[comp][tier]) byCompTier[comp][tier] = []
+        byCompTier[comp][tier].push({
           product_id: p.product_id,
           product_name: p.product_name,
           proposal_line_item: comp,
@@ -74,80 +68,70 @@ export async function POST(req: NextRequest) {
           suggested_price: p.suggested_price,
           family_tier: p.family_tier,
         })
-
-        // Sort so primary_item comes first
-        group.items.sort((a, b) => {
-          const ap = brandProducts.find(x => x.product_id === a.product_id)?.primary_item ? 0 : 1
-          const bp = brandProducts.find(x => x.product_id === b.product_id)?.primary_item ? 0 : 1
-          return ap - bp
-        })
+        // primary_item floats to front
+        if (p.primary_item) {
+          const arr = byCompTier[comp][tier]
+          const last = arr.pop()!
+          arr.unshift(last)
+        }
       }
 
       // Fetch manufacturer-varies universals (drip edge, nails)
       const { data: universals } = await supabase
         .from('srs_products')
         .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item')
-        .eq('exclude_default', false)
-        .eq('is_universal', true)
+        .eq('exclude_default', false).eq('is_universal', true)
         .ilike('manufacturer_norm', '%manufacturer varies%')
         .in('product_category', UNIVERSAL_CATEGORIES)
-        .limit(50)
+        .limit(20)
 
-      const universalByComp: Record<string, ProposalLineItem> = {}
+      const universalMap: Record<string, ProposalLineItem> = {}
       for (const p of universals ?? []) {
         const comp = normalizeCategory(p.proposal_line_item, p.product_category)
-        if (!UNIVERSAL_ITEMS.includes(comp)) continue
-        if (!universalByComp[comp] || p.primary_item) {
-          universalByComp[comp] = {
-            product_id: p.product_id,
-            product_name: p.product_name,
-            proposal_line_item: comp,
-            formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
-            suggested_price: p.suggested_price,
-            family_tier: null,
+        if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
+        if (!universalMap[comp] || p.primary_item) {
+          universalMap[comp] = {
+            product_id: p.product_id, product_name: p.product_name,
+            proposal_line_item: comp, formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
+            suggested_price: p.suggested_price, family_tier: null,
           }
         }
       }
 
-      // Assemble 3 packages
-      const buildPackage = (shingleTier: string[], hipRidgeTier: string[], starterTier: string[]): ProposalLineItem[] => {
+      const buildPackage = (shingleTiers: string[], accessoryTiers: string[]): ProposalLineItem[] => {
         const lines: ProposalLineItem[] = []
-
-        const shingles = pickProduct(byComponent['Shingles'] ?? [], shingleTier)
+        const shingles = pickProduct(byCompTier['Shingles'] ?? {}, shingleTiers)
         if (shingles) lines.push(shingles)
-
-        const hipRidge = pickProduct(byComponent['Hip & Ridge Cap'] ?? [], hipRidgeTier)
-        if (hipRidge) lines.push(hipRidge)
-
-        const starter = pickProduct(byComponent['Starter Strip'] ?? [], starterTier)
+        const hip = pickProduct(byCompTier['Hip & Ridge Cap'] ?? {}, accessoryTiers)
+        if (hip) lines.push(hip)
+        const starter = pickProduct(byCompTier['Starter Strip'] ?? {}, accessoryTiers)
         if (starter) lines.push(starter)
-
-        // Common components — always from 'good' tier
-        for (const comp of ['Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']) {
-          const item = pickProduct(byComponent[comp] ?? [], ['good', 'addon', 'better', 'best'])
-          if (item) { lines.push(item); break }  // only one underlayment/vent type
+        // One underlayment
+        for (const comp of ['Underlayment — Synthetic', 'Underlayment — Felt 30#']) {
+          const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
+          if (item) { lines.push(item); break }
         }
+        // One ice & water
         for (const comp of ['Ice & Water — Standard', 'Ice & Water — High Temp']) {
-          const item = pickProduct(byComponent[comp] ?? [], ['good', 'addon', 'better'])
+          const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
           if (item) { lines.push(item); break }
         }
+        // One vent
         for (const comp of ['Box Vent', 'Ridge Vent']) {
-          const item = pickProduct(byComponent[comp] ?? [], ['good', 'addon', 'better'])
+          const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
           if (item) { lines.push(item); break }
         }
-
-        // Universal accessories
-        for (const comp of UNIVERSAL_ITEMS) {
-          if (universalByComp[comp]) lines.push(universalByComp[comp])
+        // Universals
+        for (const comp of UNIVERSAL_COMPONENTS) {
+          if (universalMap[comp]) lines.push(universalMap[comp])
         }
-
         return lines
       }
 
       result[brand] = {
-        good:   buildPackage(['addon', 'good'],         ['addon', 'good'],   ['addon', 'good']),
-        better: buildPackage(['good',  'addon'],         ['good',  'addon'],  ['good',  'addon']),
-        best:   buildPackage(['best',  'better', 'good'], ['best', 'good'],   ['best',  'good']),
+        good:   buildPackage(['addon', 'good'],          ['addon', 'good', 'better', 'best']),
+        better: buildPackage(['good',  'addon'],          ['good',  'addon', 'better', 'best']),
+        best:   buildPackage(['best',  'better', 'good'], ['best',  'good',  'addon',  'better']),
       }
     }
 
