@@ -1,7 +1,7 @@
 'use client'
 import { useWizardStore } from '@/store/wizard-store'
 
-export function Step6Done() {
+export function Step7Done() {
   const { companyName, uploadSummary, reset } = useWizardStore()
   const { uploaded, skipped, errors } = uploadSummary
 

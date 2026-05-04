@@ -7,13 +7,14 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
-  const { baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap } = await req.json() as {
+  const { baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid } = await req.json() as {
     baseUrl: string
     apiKey: string
     productIds: number[]
     categoryMap: Record<string, string>
     warehouseUid: string
     formulaMap: Record<string, string>
+    productTierFieldUid: string
   }
 
   const encoder = new TextEncoder()
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
           const chunk = productIds.slice(from, from + PAGE)
           const { data, error } = await supabase
             .from('srs_products')
-            .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, proposal_line_item')
+            .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, proposal_line_item, family_tier')
             .in('product_id', chunk)
           if (error) throw new Error(error.message)
           allProducts.push(...(data as SrsProduct[]))
@@ -67,7 +68,8 @@ export async function POST(req: NextRequest) {
               variantsByProduct.get(product.product_id) ?? [],
               categoryMap,
               warehouseUid,
-              formulaMap
+              formulaMap,
+              productTierFieldUid
             )
             try {
               const r = await fetchWithRetry(`${baseUrl}product`, {

@@ -5,9 +5,9 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 
 interface LogEntry { name: string; ok: boolean; message?: string }
 
-export function Step5Upload() {
+export function Step6Upload() {
   const {
-    apiKey, baseUrl, filteredProductIds, categoryMap, warehouseUid, formulaMap, companyName, setUploadSummary,
+    apiKey, baseUrl, filteredProductIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid, companyName, setUploadSummary,
   } = useWizardStore()
 
   const [uploaded, setUploaded] = useState(0)
@@ -27,7 +27,7 @@ export function Step5Upload() {
         const response = await fetch('/api/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds, categoryMap, warehouseUid, formulaMap }),
+          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid }),
         })
 
         if (!response.ok || !response.body) { setDone(true); return }

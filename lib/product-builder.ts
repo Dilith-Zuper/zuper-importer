@@ -12,6 +12,15 @@ export interface SrsProduct {
   product_image_url: string | null
   suggested_price: number | null
   proposal_line_item: string | null
+  family_tier: string | null
+}
+
+function mapTier(tier: string | null): string {
+  if (tier === 'addon')  return 'Good'
+  if (tier === 'good')   return 'Better'
+  if (tier === 'better') return 'Best'
+  if (tier === 'best')   return 'Best'
+  return 'Default'
 }
 
 export interface SrsVariant {
@@ -28,7 +37,8 @@ export function buildProductPayload(
   variants: SrsVariant[],
   categoryMap: Record<string, string>,
   warehouseUid: string,
-  formulaMap: Record<string, string>
+  formulaMap: Record<string, string>,
+  productTierFieldUid: string
 ) {
   // Deduplicate colors — exclude N/A and blanks
   const colors = Array.from(new Set(
@@ -109,6 +119,7 @@ export function buildProductPayload(
       { hide_field: false, hide_to_fe: false, id: 1, label: 'Color Selected', read_only: false, type: 'SINGLE_LINE', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
       { hide_field: false, hide_to_fe: false, id: 2, label: 'Color Selection Mandatory', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
       { hide_field: false, hide_to_fe: false, id: 3, label: 'Display Color Selection', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
+      ...(productTierFieldUid ? [{ hide_field: false, hide_to_fe: false, id: 4, label: 'Product Tier', custom_field_uid: productTierFieldUid, read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: mapTier(product.family_tier) }] : []),
     ],
     option,
   }

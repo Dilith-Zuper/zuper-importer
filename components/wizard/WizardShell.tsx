@@ -2,14 +2,16 @@
 import { useWizardStore } from '@/store/wizard-store'
 import { Step1Connect } from './Step1Connect'
 import { Step2Brands }  from './Step2Brands'
-import { Step3Preview } from './Step3Preview'
-import { Step4Validate } from './Step4Validate'
-import { Step5Upload }  from './Step5Upload'
-import { Step6Done }    from './Step6Done'
+import { Step3ProductLines } from './Step3ProductLines'
+import { Step4Preview } from './Step4Preview'
+import { Step5Validate } from './Step5Validate'
+import { Step6Upload }  from './Step6Upload'
+import { Step7Done }    from './Step7Done'
 
 const STEPS = [
   { label: 'Connect',  short: 'Connect'  },
   { label: 'Brands',   short: 'Brands'   },
+  { label: 'Lines',    short: 'Lines'    },
   { label: 'Preview',  short: 'Preview'  },
   { label: 'Validate', short: 'Validate' },
   { label: 'Upload',   short: 'Upload'   },
@@ -79,10 +81,11 @@ export function WizardShell() {
       <main className="max-w-[760px] mx-auto px-6 py-12">
         {step === 1 && <Step1Connect />}
         {step === 2 && <Step2Brands />}
-        {step === 3 && <Step3Preview />}
-        {step === 4 && <Step4Validate />}
-        {step === 5 && <Step5Upload />}
-        {step === 6 && <Step6Done />}
+        {step === 3 && <Step3ProductLines />}
+        {step === 4 && <Step4Preview />}
+        {step === 5 && <Step5Validate />}
+        {step === 6 && <Step6Upload />}
+        {step === 7 && <Step7Done />}
       </main>
     </div>
   )

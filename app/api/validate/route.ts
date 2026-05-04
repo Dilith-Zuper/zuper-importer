@@ -228,8 +228,53 @@ export async function POST(req: NextRequest) {
           controller.close(); return
         }
 
+        // ── Check 6: Product Tier Custom Field ───────────────────────────────
+        enqueue({ check: 'tier_field', status: 'running', detail: 'Checking Product Tier custom field…' })
+        let productTierFieldUid = ''
+        try {
+          const listRes = await fetchWithRetry(`${baseUrl}settings/custom_fields?module_name=PRODUCT`, { headers: zuperHeaders(apiKey) })
+          const fields: { custom_field_uid: string; label: string; field_type: string }[] = listRes.json?.data ?? []
+          const existing = fields.find(f => f.label === 'Product Tier' && f.field_type === 'RADIO')
+
+          if (existing) {
+            productTierFieldUid = existing.custom_field_uid
+            enqueue({ check: 'tier_field', status: 'pass', detail: `Using existing "Product Tier" field (${productTierFieldUid.slice(0, 8)}…)` })
+          } else {
+            const cr = await fetchWithRetry(`${baseUrl}settings/custom_fields/new`, {
+              method: 'POST',
+              headers: zuperHeaders(apiKey),
+              body: JSON.stringify({
+                module_name: 'PRODUCT',
+                custom_field: {
+                  display_order: 5,
+                  label: 'Product Tier',
+                  description: '',
+                  field_type: 'RADIO',
+                  group: 'Default',
+                  options: ['Good', 'Better', 'Best', 'Default'],
+                  required: false,
+                  component: 'radio',
+                  read_only: false,
+                  hide_field: false,
+                  hide_to_fe: false,
+                  restrict_to_access_role: { is_enabled: false, roles: [] },
+                  is_dependent: false,
+                  dependent_on: '',
+                  dependent_options: [],
+                },
+              }),
+            })
+            productTierFieldUid = cr.json?.data?.custom_field_uid ?? ''
+            if (!productTierFieldUid) throw new Error(`Failed to create Product Tier field — ${JSON.stringify(cr.json)}`)
+            enqueue({ check: 'tier_field', status: 'pass', detail: 'Created "Product Tier" custom field' })
+          }
+        } catch (e: unknown) {
+          // Non-blocking — Product Tier is optional, upload continues without it
+          enqueue({ check: 'tier_field', status: 'fail', detail: `Optional: ${(e as Error).message}` })
+        }
+
         // ── All done ──────────────────────────────────────────────────────────
-        enqueue({ check: 'done', categoryMap, warehouseUid, tokenMap, formulaMap })
+        enqueue({ check: 'done', categoryMap, warehouseUid, tokenMap, formulaMap, productTierFieldUid })
         controller.close()
       } catch (e: unknown) {
         enqueue({ check: 'done', error: (e as Error).message })

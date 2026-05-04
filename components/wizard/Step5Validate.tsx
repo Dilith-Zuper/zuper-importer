@@ -10,11 +10,12 @@ const CHECK_LABELS: Record<string, string> = {
   tokens:     'Measurement Tokens',
   formulas:   'CPQ Formulas',
   uoms:       'Units of Measure',
+  tier_field: 'Product Tier Custom Field',
 }
 
-const CHECK_ORDER = ['categories', 'warehouse', 'tokens', 'formulas', 'uoms'] as const
+const CHECK_ORDER = ['categories', 'warehouse', 'tokens', 'formulas', 'uoms', 'tier_field'] as const
 
-export function Step4Validate() {
+export function Step5Validate() {
   const { apiKey, baseUrl, filteredProductIds, companyName, setValidationResult, setValidationData, setStep } = useWizardStore()
   const [results, setResults] = useState<Record<string, ValidationResult>>({})
   const [done, setDone] = useState(false)
@@ -70,6 +71,7 @@ export function Step4Validate() {
                   warehouseUid: data.warehouseUid,
                   tokenMap: data.tokenMap as Record<string, TokenInfo>,
                   formulaMap: data.formulaMap,
+                  productTierFieldUid: data.productTierFieldUid ?? '',
                 })
               }
               continue
@@ -87,7 +89,8 @@ export function Step4Validate() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const allPassed = CHECK_ORDER.every(c => results[c]?.status === 'pass')
+  const REQUIRED_CHECKS = CHECK_ORDER.filter(c => c !== 'tier_field')
+  const allPassed = REQUIRED_CHECKS.every(c => results[c]?.status === 'pass')
 
   return (
     <div className="space-y-6 max-w-xl">
@@ -123,7 +126,7 @@ export function Step4Validate() {
             ✓ All checks passed — Ready to import {filteredProductIds.length.toLocaleString()} products to {companyName}
           </div>
           <button
-            onClick={() => setStep(5)}
+            onClick={() => setStep(6)}
             className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
           >
             Begin Upload →

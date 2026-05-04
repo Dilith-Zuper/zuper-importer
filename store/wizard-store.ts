@@ -6,6 +6,7 @@ interface WizardStore extends WizardState {
   setStep: (step: WizardState['step']) => void
   setConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
   setSelectedBrands: (brands: string[]) => void
+  setSelectedProductLines: (lines: Record<string, string[]>) => void
   setPreview: (ids: number[], counts: WizardState['productCounts']) => void
   setValidationResult: (result: ValidationResult) => void
   setValidationData: (data: {
@@ -13,6 +14,7 @@ interface WizardStore extends WizardState {
     warehouseUid: string
     tokenMap: Record<string, TokenInfo>
     formulaMap: Record<string, string>
+    productTierFieldUid: string
   }) => void
   setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[] }) => void
   reset: () => void
@@ -25,7 +27,9 @@ const initialState: WizardState = {
   baseUrl: '',
   companyName: '',
   selectedBrands: [],
+  selectedProductLines: {},
   filteredProductIds: [],
+  productTierFieldUid: '',
   productCounts: { total: 0, byCategory: {} },
   validationResults: [],
   categoryMap: {},
@@ -45,8 +49,10 @@ export const useWizardStore = create<WizardStore>((set) => ({
 
   setSelectedBrands: (brands) => set({ selectedBrands: brands }),
 
+  setSelectedProductLines: (lines) => set({ selectedProductLines: lines }),
+
   setPreview: (ids, counts) =>
-    set({ filteredProductIds: ids, productCounts: counts, step: 4 }),
+    set({ filteredProductIds: ids, productCounts: counts, step: 5 }),
 
   setValidationResult: (result) =>
     set((s) => ({
@@ -56,9 +62,9 @@ export const useWizardStore = create<WizardStore>((set) => ({
       ],
     })),
 
-  setValidationData: (data) => set({ ...data, step: 5 }),
+  setValidationData: (data) => set({ ...data }),
 
-  setUploadSummary: (summary) => set({ uploadSummary: summary, step: 6 }),
+  setUploadSummary: (summary) => set({ uploadSummary: summary, step: 7 }),
 
   reset: () => set(initialState),
 }))

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
+import { normalizeCategory, NON_CORE_LINES } from '@/lib/category-norm'
 
 const CATEGORY_ORDER = [
   'Shingles',
@@ -44,32 +45,6 @@ const CATEGORY_ORDER = [
   'OTHER',
 ]
 
-const CATEGORY_NORM: Record<string, string> = {
-  'SHINGLES':              'Shingles',
-  'HIP AND RIDGE':         'Hip & Ridge Cap',
-  'STARTER':               'Starter Strip',
-  'UNDERLAYMENT':          'Underlayment — Synthetic',
-  'ICE AND WATER':         'Ice & Water — Standard',
-  'VENTS':                 'Box Vent',
-  'OTHER FASTENERS':       'Fasteners',
-  'COIL NAILS':            'Coil Nails',
-  'DECKING':               'Roof Decking (OSB)',
-  'DRIP EDGE':             'Drip Edge',
-  'OTHER FLASHING METAL':  'Step Flashing',
-  'PIPE FLASHING':         'Pipe Boot 3"',
-  'CAULK':                 'Caulk / Sealant',
-  'SPRAY PAINT':           'Spray Paint',
-  'COMMERCIAL':            'Commercial Membrane (TPO/EPDM)',
-  'SIDING':                'Siding',
-  'GUTTER/ALUMINUM/COIL':  'Gutter Sections',
-  'TOOLS/SAFETY':          'TOOLS/SAFETY',
-  'OTHER':                 'OTHER',
-}
-
-function normalizeCategory(proposalLineItem: string | null, productCategory: string): string {
-  if (proposalLineItem) return proposalLineItem
-  return CATEGORY_NORM[productCategory] ?? productCategory
-}
 
 function sortGroups(entries: [string, Product[]][]): [string, Product[]][] {
   return entries.sort(([a], [b]) => {
@@ -92,8 +67,8 @@ interface Product {
   suggested_price: number | null
 }
 
-export function Step3Preview() {
-  const { selectedBrands, companyName, setPreview, setStep } = useWizardStore()
+export function Step4Preview() {
+  const { selectedBrands, selectedProductLines, companyName, setPreview, setStep } = useWizardStore()
   const [products, setProducts] = useState<Product[]>([])
   const [counts, setCounts] = useState<{ total: number; byCategory: Record<string, number> }>({ total: 0, byCategory: {} })
   const [activeBrand, setActiveBrand] = useState<string>('all')
@@ -103,13 +78,13 @@ export function Step3Preview() {
     fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedBrands }),
+      body: JSON.stringify({ selectedBrands, selectedProductLines }),
     }).then(r => r.json()).then(d => {
       setProducts(d.products ?? [])
       setCounts(d.counts ?? { total: 0, byCategory: {} })
       setLoading(false)
     })
-  }, [selectedBrands])
+  }, [selectedBrands, selectedProductLines])
 
   const brandCounts: Record<string, number> = {}
   for (const p of products) {
@@ -213,7 +188,7 @@ export function Step3Preview() {
         Confirm &amp; Run Pre-flight Checks →
       </button>
 
-      <button onClick={() => setStep(2)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+      <button onClick={() => setStep(3)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
         ← Back to brand selection
       </button>
     </div>
