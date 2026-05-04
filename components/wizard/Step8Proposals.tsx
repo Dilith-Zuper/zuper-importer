@@ -119,7 +119,7 @@ export function Step8Proposals() {
     setPreflightLoading(false)
   }
 
-  const allPreflightReady = !!(preflight.categoryUid && preflight.statusUid && preflight.layoutUid)
+  const allPreflightReady = !!(preflight.categoryUid && preflight.statusUid)
 
   useEffect(() => {
     if (allPreflightReady && phase === 'preflight') loadPackages()
@@ -214,26 +214,66 @@ export function Step8Proposals() {
 
       {/* ── Pre-flight checks ── */}
       <div className="bg-white rounded-2xl border border-[#E5E2DC] divide-y divide-[#E5E2DC]">
-        {[
-          { key: 'category', label: 'Roof Inspection job category', value: preflight.categoryName, uid: preflight.categoryUid },
-          { key: 'status',   label: '"Create Proposal" job status', value: preflight.statusName,   uid: preflight.statusUid },
-          { key: 'layout',   label: 'Residential Roofing Proposal layout', value: preflight.layoutName, uid: preflight.layoutUid },
-        ].map(item => (
-          <div key={item.key} className="flex items-center gap-4 px-5 py-4">
-            {preflightLoading && !item.uid
-              ? <Spinner />
-              : item.uid
-              ? <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                </div>
-              : <div className="w-6 h-6 rounded-full border-2 border-amber-400 flex-shrink-0" />
-            }
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-gray-900">{item.label}</p>
-              <p className="text-xs text-gray-400">{item.value ?? (preflightLoading ? 'Checking…' : 'Not found — pick below')}</p>
+        {([
+          {
+            key: 'category',
+            label: 'Roof Inspection job category',
+            value: preflight.categoryName,
+            uid: preflight.categoryUid,
+            optional: false,
+            hasOptions: categoryOptions.length > 0,
+            emptyMsg: 'No job categories exist in this Zuper account',
+          },
+          {
+            key: 'status',
+            label: '"Create Proposal" job status',
+            value: preflight.statusName,
+            uid: preflight.statusUid,
+            optional: false,
+            hasOptions: statusOptions.length > 0,
+            emptyMsg: 'No statuses exist in this category',
+          },
+          {
+            key: 'layout',
+            label: 'Residential Roofing Proposal layout',
+            value: preflight.layoutName,
+            uid: preflight.layoutUid,
+            optional: true,
+            hasOptions: layoutOptions.length > 0,
+            emptyMsg: 'Optional — not found, templates will use account default',
+          },
+        ] as const).map(item => {
+          const subText = item.uid
+            ? item.value
+            : preflightLoading
+            ? 'Checking…'
+            : item.hasOptions
+            ? 'Not found — pick below'
+            : item.emptyMsg
+
+          return (
+            <div key={item.key} className="flex items-center gap-4 px-5 py-4">
+              {preflightLoading && !item.uid
+                ? <Spinner />
+                : item.uid
+                ? <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                : item.optional
+                ? <div className="w-6 h-6 rounded-full border-2 border-amber-300 flex items-center justify-center flex-shrink-0">
+                    <span className="text-amber-400 text-xs font-bold leading-none">—</span>
+                  </div>
+                : <div className="w-6 h-6 rounded-full border-2 border-red-400 flex-shrink-0" />
+              }
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">{item.label}</p>
+                <p className={`text-xs ${item.optional && !item.uid && !preflightLoading ? 'text-amber-500' : !item.uid && !preflightLoading && !item.hasOptions ? 'text-red-400' : 'text-gray-400'}`}>
+                  {subText}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Pickers */}
@@ -305,13 +345,33 @@ export function Step8Proposals() {
           )}
 
           {/* ── Creation progress ── */}
-          {phase === 'creating' && (
-            <div className="bg-[#1C1917] rounded-2xl p-4 space-y-1 font-mono text-xs">
-              {creationLog.map((entry, i) => (
-                <div key={i} className={entry.status === 'done' ? 'text-green-400' : entry.status === 'error' ? 'text-red-400' : 'text-orange-400'}>
-                  {entry.status === 'done' ? '✓' : entry.status === 'error' ? '✗' : '⟳'} {entry.brand} — {entry.msg}
-                </div>
-              ))}
+          {(phase === 'creating' || (phase === 'done' && creationLog.length > 0)) && (
+            <div className="bg-[#1C1917] rounded-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
+                <span className="text-xs text-gray-500 font-mono">Creation log</span>
+                <button
+                  onClick={() => {
+                    const text = creationLog.map(e => `${e.status === 'done' ? '✓' : e.status === 'error' ? '✗' : e.status === 'debug' ? '·' : '⟳'} ${e.status !== 'debug' ? `${e.brand} — ` : ''}${e.msg}`).join('\n')
+                    navigator.clipboard.writeText(text)
+                  }}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 font-mono border border-white/10 rounded px-2 py-0.5 transition-colors"
+                >
+                  Copy log
+                </button>
+              </div>
+              <div className="p-4 space-y-0.5 font-mono text-xs overflow-y-auto max-h-96">
+                {creationLog.map((entry, i) => (
+                  <div key={i} className={
+                    entry.status === 'done'  ? 'text-green-400' :
+                    entry.status === 'error' ? 'text-red-400' :
+                    entry.status === 'debug' ? 'text-gray-400' :
+                    'text-orange-400'
+                  }>
+                    {entry.status === 'done' ? '✓' : entry.status === 'error' ? '✗' : entry.status === 'debug' ? '·' : '⟳'}{' '}
+                    {entry.status !== 'debug' && <>{entry.brand} — </>}{entry.msg}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

@@ -6,8 +6,13 @@ import type { ProposalLineItem, BrandPackage } from '@/types/wizard'
 
 const CPQ_CATEGORIES = ['SHINGLES', 'HIP AND RIDGE', 'STARTER', 'UNDERLAYMENT', 'ICE AND WATER', 'VENTS']
 const CPQ_COMPONENTS = ['Shingles', 'Hip & Ridge Cap', 'Starter Strip', 'Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']
-const UNIVERSAL_COMPONENTS = ['Drip Edge', 'Coil Nails', 'Fasteners']
-const UNIVERSAL_CATEGORIES = ['DRIP EDGE', 'COIL NAILS', 'OTHER FASTENERS']
+
+// Universal accessories — same across Good / Better / Best, drawn from manufacturer-varies products
+const UNIVERSAL_CATEGORIES = ['DRIP EDGE', 'COIL NAILS', 'OTHER FASTENERS', 'OTHER FLASHING METAL', 'PIPE FLASHING', 'CAULK']
+const UNIVERSAL_COMPONENTS  = [
+  'Drip Edge', 'Step Flashing', 'W-Valley', 'Counter / Headwall Flashing',
+  'Pipe Boot 3"', 'Coil Nails', 'Plastic Cap Nails', 'Fasteners', 'Caulk / Sealant',
+]
 
 function pickProduct(byTier: Record<string, ProposalLineItem[]>, tierPrefs: string[]): ProposalLineItem | null {
   for (const tier of tierPrefs) {
@@ -83,7 +88,7 @@ export async function POST(req: NextRequest) {
         .eq('exclude_default', false).eq('is_universal', true)
         .ilike('manufacturer_norm', '%manufacturer varies%')
         .in('product_category', UNIVERSAL_CATEGORIES)
-        .limit(20)
+        .limit(100)
 
       const universalMap: Record<string, ProposalLineItem> = {}
       for (const p of universals ?? []) {
