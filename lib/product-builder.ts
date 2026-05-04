@@ -48,12 +48,11 @@ export function buildProductPayload(
   ))
 
   const cappedColors = colors.slice(0, 50)
-  const hasColors = cappedColors.length > 1
 
-  const option = hasColors ? {
+  const option = cappedColors.length > 0 ? {
     customer_selection: true,
     mandate_customer_selection: false,
-    option_label: 'Color Selection',
+    option_label: 'Color',
     option_values: cappedColors.map(c => ({
       option_value: c,
       option_image: '',
@@ -61,7 +60,8 @@ export function buildProductPayload(
     })),
   } : {
     customer_selection: false,
-    option_label: 'Option',
+    mandate_customer_selection: false,
+    option_label: 'Color',
     option_values: [],
   }
 
@@ -85,7 +85,7 @@ export function buildProductPayload(
     is_available: true,
     product_category: categoryMap[product.product_category] ?? '',
     price: product.suggested_price ?? 0,
-    purchase_price: 0,
+    purchase_price: null,
     min_quantity: 1,
     quantity: 1,
     currency: '',
