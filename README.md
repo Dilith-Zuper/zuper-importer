@@ -1,6 +1,6 @@
 # SRS Product Importer — Zuper
 
-A Next.js wizard that imports the SRS roofing catalog from a Supabase database into any Zuper customer account via the Zuper REST API.
+A Next.js wizard that imports the SRS roofing catalog from a Supabase database into any Zuper customer account via the Zuper REST API, then generates Good / Better / Best CPQ proposal templates automatically.
 
 **Live:** https://zuper-importer.vercel.app
 **GitHub:** https://github.com/Dilith-Zuper/zuper-importer
@@ -11,9 +11,9 @@ A Next.js wizard that imports the SRS roofing catalog from a Supabase database i
 
 - **Next.js 14** (App Router, TypeScript)
 - **Tailwind CSS** — warm off-white (`#FAF9F7`) theme, Zuper orange (`#F97316`) accent, Inter font
-- **Zustand** — wizard state across all 7 steps
+- **Zustand** — wizard state across all 8 steps
 - **Supabase JS** (server-side only, service role key) — queries `srs_products` + `srs_variants`
-- **Zuper REST API** — products, categories, warehouse, measurement tokens, CPQ formulas, custom fields
+- **Zuper REST API** — products, categories, warehouse, measurement tokens, CPQ formulas, custom fields, proposal templates
 - **Vercel** — auto-deploys on push to `main`; SSE streaming supported
 
 ---
@@ -59,7 +59,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `product_id` | PK |
 | `product_name` | |
 | `product_category` | Uppercase raw category (`SHINGLES`, `HIP AND RIDGE`, etc.) |
-| `proposal_line_item` | Proper-case category for display (`Shingles`, `Hip & Ridge Cap`, etc.) |
+| `proposal_line_item` | Proper-case display category (`Shingles`, `Hip & Ridge Cap`, etc.) |
 | `product_line` | Product series/family name (`Timberline HDZ`, `Duration`, `Landmark PRO`) |
 | `manufacturer` | Raw manufacturer name |
 | `manufacturer_norm` | Normalized brand (`Gaf`, `Certainteed`, `Owens Corning`) |
@@ -67,6 +67,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `is_universal` | True = generic accessory included in every brand selection |
 | `exclude_default` | True = skip entirely |
 | `family_tier` | `addon` / `good` / `better` / `best` / null — maps to proposal tiers |
+| `primary_item` | Boolean — preferred representative product for a product line |
 | `product_uom` | Unit of measure (mapped via `lib/uom-map.ts`) |
 | `suggested_price` | |
 | `product_description` | |
@@ -80,7 +81,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `product_id` | FK → srs_products |
 | `color_name` | Color option (deduplicated, capped at 50 per Zuper limit) |
 | `variant_image_url` | **Never sent to Zuper** |
-| `is_restricted` | Restricted variants are excluded from upload |
+| `is_restricted` | Restricted variants are excluded |
 
 ---
 
@@ -99,7 +100,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 
 ## Product Tiers (`family_tier` → Zuper "Product Tier" custom field)
 
-| DB `family_tier` | Price point | Real meaning | Zuper custom field value |
+| DB `family_tier` | Price | Real meaning | Zuper custom field value |
 |---|---|---|---|
 | `addon` | ~$95 | Economy / entry-level shingles | **Good** |
 | `good` | ~$131 | Standard architectural (most popular) | **Better** |
@@ -107,13 +108,27 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `best` | ~$431 | Designer / luxury | **Best** |
 | `null` | — | Universal accessories (always included) | **Default** |
 
-**GAF examples:** addon=Royal Sovereign, good=Timberline HDZ, better=Timberline UHDZ, best=Grand Sequoia/Grand Canyon
-**CertainTeed examples:** addon=Landmark, good=Landmark PRO, better=Belmont, best=Presidential Shake
-**OC examples:** addon=Oakridge/Supreme, good=Duration, best=Woodcrest/Berkshire
+**GAF:** addon=Royal Sovereign, good=Timberline HDZ, better=Timberline UHDZ, best=Grand Sequoia/Grand Canyon
+**CertainTeed:** addon=Landmark, good=Landmark PRO, better=Belmont, best=Presidential Shake
+**OC:** addon=Oakridge/Supreme, good=Duration, best=Woodcrest/Berkshire
 
 ---
 
-## Wizard Flow (7 Steps)
+## Brands That Support G/B/B Proposals (7 brands)
+
+| Brand | Shingle tiers | Hip&Ridge tiers | Starter tiers |
+|---|---|---|---|
+| CertainTeed | 4 (addon/good/better/best) | 3 | 3 |
+| GAF | 4 | 2 | 1 |
+| Owens Corning | 3 (no better) | 2 | 2 |
+| IKO | 4 | 2 | 1 |
+| Atlas | 3 | 2 | 1 |
+| Tamko | 3 | 1 | 1 |
+| Malarkey | 3 | 1 | 2 |
+
+---
+
+## Wizard Flow (8 Steps)
 
 ### Step 1 — Connect
 - User enters company login name + API key
@@ -122,19 +137,20 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 
 ### Step 2 — Brands
 - `GET /api/brands` → paginates `srs_products`, counts per `manufacturer_norm`
-- Big 3 identified via `is_big3_brand = true` column (not string matching — avoids case mismatch)
+- Big 3 identified via `is_big3_brand = true` column (not string matching)
 - Big 3 pre-selected and toggleable; top 9 secondary as tiles; rest in searchable list
 - Stores `selectedBrands[]` in Zustand
 
 ### Step 3 — Product Lines
 - `POST /api/product-lines` → for each selected brand, counts products per `product_line` value
-- Shows product lines as toggle pills per brand — **all pre-selected by default**
-- **Smart defaults**: non-roofing lines are deselected automatically (see `lib/product-line-skips.ts`):
+- Shows product lines as toggle pills per brand — all pre-selected by default
+- **Smart defaults** from cross-reference with Zuper product master dump: non-roofing lines deselected automatically (`lib/product-line-skips.ts`):
   - GAF: EverGuard (commercial TPO), Timberline Solar/S1, RUBEROID, HydroStop, Drill-Tec, etc.
   - CertainTeed: Restoration Millwork, Kingston Rail, Solstice (solar), Flintlastic, GlasRoc, etc.
-  - Owens Corning: FOAMULAR (insulation), PINK Next Gen, WEARDECK, Thermafiber, etc.
-- Multi-product lines shown prominently; single-product accessory lines collapsed
+  - OC: FOAMULAR (insulation), PINK Next Gen, WEARDECK, Thermafiber, etc.
+- Multi-product lines shown prominently; single-product accessory lines collapsed under expandable section
 - Per-brand search box
+- Continue button shows live product count as lines are toggled
 - Stores `selectedProductLines: Record<brand, string[]>` in Zustand
 
 ### Step 4 — Preview
@@ -142,7 +158,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 - Query: `manufacturer_norm IN (selectedBrands) OR (is_universal=true AND manufacturer_norm ILIKE '%manufacturer varies%')`
 - In-memory filter: only products whose `product_line` is in `selectedProductLines[brand]`
 - Shows brand filter tabs + category breakdown sorted by roofing importance
-- Category sort: Shingles → Hip & Ridge → Starter → Underlayment → Ice & Water → Vents → Drip Edge → Flashings → Fasteners → Pipes → Decking → Caulk → Gutters → Siding → Commercial → Tools → Other
+- Category sort order: Shingles → Hip & Ridge → Starter → Underlayment → Ice & Water → Vents → Drip Edge → Flashings → Fasteners → Pipes → Decking → Caulk → Gutters → Siding → Commercial → Tools → Other
 - Stores `filteredProductIds[]` in Zustand
 
 ### Step 5 — Validate (Pre-flight, 6 checks)
@@ -162,14 +178,43 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
   - `product_image: ''` and `option_image: ''` — never sends URLs
   - Color options from variants, capped at 50
   - CPQ formula linked via `proposal_line_item → formula_key → uid`
-  - `meta_data` includes "Product Tier" field with mapped value (Good/Better/Best/Default)
+  - `meta_data` includes "Product Tier" RADIO field with mapped value (Good/Better/Best/Default)
 - Uploads **100 products concurrently** per batch (`Promise.allSettled`), 3s between batches
-- Live log + progress bar + per-batch stats
+- **Captures `product_uid` from each Zuper response** → builds `productIdMap: { srs_product_id → zuper_product_uid }`
+- `productIdMap` returned in SSE `done` event and stored in Zustand — used in Step 8 for proposal line items
 
 ### Step 7 — Done
 - Shows uploaded / skipped / error counts with colored stat cards
 - Error CSV download
-- "Start New Import →" resets store
+- **"Build Proposal Templates →"** advances to Step 8
+- "Start New Import" resets store
+
+### Step 8 — Proposal Templates (G/B/B CPQ)
+Three phases:
+
+**Phase A — Pre-flight** (`POST /api/proposal-preflight`)
+- Checks Zuper account for required resources:
+  - "Roof Inspection" job category → `categoryUid`
+  - "Create Proposal" job status within that category → `statusUid`
+  - "Residential Roofing Proposal" layout template → `layoutUid`
+- If any not found: shows picker UI listing available options
+
+**Phase B — Package Preview** (`POST /api/proposal-preview`)
+- Filters to eligible brands (have shingles in 2+ tiers within selected product lines)
+- Assembles Good / Better / Best packages per brand using tier mapping:
+  - Good: `addon` shingles + `addon`→`good` hip&ridge/starter + `good` accessories
+  - Better: `good` shingles + `good` hip&ridge/starter + `good` accessories
+  - Best: `best` shingles + `best`→`good` hip&ridge/starter + `good` accessories
+  - Universal: drip edge + coil nails from manufacturer-varies universals
+- `primary_item = true` products preferred; falls back to first in tier
+- User can edit template name and description per brand
+
+**Phase C — Creation** (`POST /api/create-proposals`, SSE stream)
+For each brand package:
+1. `POST /invoice_estimate/proposal_template` → `template_uid`
+2. `POST /invoice_estimate/proposal_template/{uid}/options?items_type=LINE_ITEMS` → creates Good/Better/Best options, get `option_uid` for each
+3. `PUT /invoice_estimate/proposal_template/{uid}` → set CPQ trigger (category + status) + layout + `is_draft: false`
+4. For each option: `POST HEADER` line item → get `section_uid`, then `POST ITEM` for each product using `productIdMap` for Zuper product UID and `formulaMap` for CPQ formula (falls back to `FIXED=1` if no formula)
 
 ---
 
@@ -182,7 +227,10 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `/api/product-lines` | POST | Return product lines per brand with counts |
 | `/api/preview` | POST | Fetch + filter products, return IDs and category breakdown |
 | `/api/validate` | POST | SSE — 6 pre-flight checks, find/create Zuper resources |
-| `/api/upload` | POST | SSE — build payloads and upload products to Zuper |
+| `/api/upload` | POST | SSE — build payloads, upload products, return productIdMap |
+| `/api/proposal-preflight` | POST | Check job category, status, layout template in Zuper |
+| `/api/proposal-preview` | POST | Assemble G/B/B packages from DB for eligible brands |
+| `/api/create-proposals` | POST | SSE — create CPQ proposal templates in Zuper |
 
 ---
 
@@ -193,7 +241,7 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 | `lib/product-builder.ts` | Builds Zuper product JSON payload from SRS product + variants |
 | `lib/category-norm.ts` | Maps uppercase `product_category` → proper-case display names |
 | `lib/product-line-skips.ts` | Per-brand prefix lists for non-roofing lines to deselect by default |
-| `lib/formula-definitions.ts` | 25 CPQ formula definitions with expression maps |
+| `lib/formula-definitions.ts` | 25 CPQ formula definitions with expression maps + ITEM_TO_FORMULA_KEY |
 | `lib/token-definitions.ts` | 18 required roof measurement tokens |
 | `lib/uom-map.ts` | SRS UOM codes → Zuper UOM values |
 | `lib/zuper-fetch.ts` | `fetchWithRetry`, `zuperHeaders`, `bestZuperMatch`, `chunks`, `sleep` |
@@ -203,33 +251,40 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 ## Key Technical Decisions
 
 **POST routes + fetch streaming (not EventSource)**
-Validate and upload use `POST` with JSON body + `ReadableStream` SSE. `EventSource` is GET-only and silently truncated 1,200+ product IDs in the URL, causing only 5 categories and ~900 products to be processed.
+All long-running routes use `POST` with JSON body + `ReadableStream` SSE. `EventSource` is GET-only and silently truncated 1,200+ product IDs in the URL.
 
 **No images sent to Zuper**
-`product_image` and `option_image` always `''`. Zuper rejects many SRS image URLs ("Invalid Image / Attachment") — broken CDN links, unsupported extensions like `.5a`.
+`product_image` and `option_image` always `''`. Zuper rejects many SRS image URLs.
 
 **Color options capped at 50**
-Zuper enforces a 50-option limit per product. Colors sliced to 50 before building the payload.
+Zuper enforces a 50-option limit per product.
 
 **Supabase pagination everywhere**
-All queries use `.range(from, from + PAGE - 1)`. The default Supabase JS cap is 1,000 rows — silent truncation was the root cause of missing categories and low product counts.
+All queries use `.range(from, from + PAGE - 1)`. The default Supabase JS cap is 1,000 rows.
 
 **`is_big3_brand` column for Big 3 detection**
-String matching (`name === 'Gaf'`) only matched 8 products due to DB storing `'GAF'` vs `'Gaf'`. The column is authoritative.
+String matching only matched 8 products due to DB storing `'GAF'` vs `'Gaf'`.
 
 **Universal products scoped to manufacturer-varies only**
-`is_universal=true` covers 6,873 products including specialty brands (Bay Cities Metal, Topshield, etc.) which would bloat any brand selection by 6,100+ irrelevant products. Only `manufacturer_norm ILIKE '%manufacturer varies%'` universals (586 products) are included.
+`is_universal=true` covers 6,873 products. Only `manufacturer_norm ILIKE '%manufacturer varies%'` (586 products) are included to avoid bloat.
 
 **Product line smart defaults from Zuper master dump**
-Cross-referenced SRS catalog against Zuper product master dump (us_east + us_west CSVs). Non-roofing lines (commercial TPO, solar, insulation board, millwork, railing) are deselected by default in Step 3.
+Cross-referenced SRS catalog against Zuper product master dump (us_east + us_west CSVs, 35,195 products). Non-roofing lines deselected by default in Step 3.
 
 **Product Tier custom field is non-blocking**
-If Check 6 fails (field already exists with a different config, permissions issue, etc.), the upload proceeds without setting the tier field. `productTierFieldUid = ''` causes the meta_data entry to be omitted from the payload.
+If Check 6 fails, upload proceeds without setting the tier field. `productTierFieldUid = ''` causes the meta_data entry to be omitted.
+
+**productIdMap captured during upload**
+Each successful Zuper upload response includes `data.product_uid`. These are accumulated into `productIdMap: { srs_product_id → zuper_product_uid }` and stored in Zustand for use in Step 8 proposal line items.
+
+**G/B/B proposal option creation**
+Options (Good/Better/Best) are created explicitly via `POST /options?items_type=LINE_ITEMS` after the template is created. Line items use `quantity_type: FORMULA` with the pre-set CPQ formula UIDs; falls back to `FIXED=1` if no formula exists for the item.
 
 ---
 
 ## Known Limitations
 
-- **Vercel free tier** has a 60s function timeout. Parallel batches of 100 typically finish well under this for ~1,700 products, but very large selections may timeout. Upgrade to Vercel Pro for 300s.
+- **Vercel free tier** has a 60s function timeout. Parallel batches of 100 typically finish well under this for ~1,700 products. Very large selections or slow Zuper APIs may timeout.
 - Products with >50 color variants are silently capped at 50.
-- Step 8 (Proposal Template Builder — Good/Better/Best estimate templates in Zuper) is planned but not yet built. Endpoint definitions TBD.
+- `productIdMap` is populated during upload. If products were imported in a previous session, Step 8 won't have their UIDs — run a fresh import to use the proposal builder.
+- If "Residential Roofing Proposal" layout template or "Roof Inspection" job category don't exist in the Zuper account, the user is prompted to pick from available options.
