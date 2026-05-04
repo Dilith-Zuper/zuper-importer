@@ -1,15 +1,34 @@
 'use client'
+import React from 'react'
 import { useWizardStore } from '@/store/wizard-store'
 import type { Trade } from '@/types/wizard'
 
-const TRADE_DEFS: { id: Trade; label: string; description: string; count: string; brands: string; icon: string }[] = [
+// SVG icons per trade — inline to keep component self-contained
+const TRADE_ICONS: Record<Trade, React.ReactNode> = {
+  roofing: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10.5L12 3l9 7.5" /><path d="M5 8.5V20h14V8.5" /><path d="M9 20v-6h6v6" />
+    </svg>
+  ),
+  gutters: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7h18" /><path d="M5 7v3a2 2 0 002 2h10a2 2 0 002-2V7" /><path d="M10 12v6" /><path d="M14 12v6" />
+    </svg>
+  ),
+  siding: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="1" /><path d="M3 8h18" /><path d="M3 13h18" /><path d="M3 18h18" />
+    </svg>
+  ),
+}
+
+const TRADE_DEFS: { id: Trade; label: string; description: string; count: string; brands: string }[] = [
   {
     id: 'roofing',
     label: 'Roofing',
     description: 'Shingles, underlayment, flashings, vents, and all roofing accessories',
     count: '19,807',
     brands: 'GAF · CertainTeed · Owens Corning · IKO · Atlas',
-    icon: '🏠',
   },
   {
     id: 'gutters',
@@ -17,7 +36,6 @@ const TRADE_DEFS: { id: Trade; label: string; description: string; count: string
     description: 'K-style and half-round gutters, downspouts, elbows, hangers, and coil stock',
     count: '1,230',
     brands: 'Berger · Englert · US Aluminum · Rainstamp · Quality Edge',
-    icon: '🪣',
   },
   {
     id: 'siding',
@@ -25,7 +43,6 @@ const TRADE_DEFS: { id: Trade; label: string; description: string; count: string
     description: 'Vinyl, fiber cement, and composite siding panels, trim, and accessories',
     count: '2,438',
     brands: 'James Hardie · CertainTeed · Mastic · Azek · Royal',
-    icon: '🏘',
   },
 ]
 
@@ -81,7 +98,9 @@ export function Step2Trades() {
               </div>
 
               <div className="flex items-start gap-4 pr-8">
-                <span className="text-3xl flex-shrink-0 mt-0.5">{trade.icon}</span>
+                <span className={`flex-shrink-0 mt-0.5 ${selected ? 'text-orange-500' : 'text-gray-400'}`}>
+                  {TRADE_ICONS[trade.id]}
+                </span>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-3">
                     <p className={`text-lg font-bold ${selected ? 'text-orange-700' : 'text-gray-900'}`}>

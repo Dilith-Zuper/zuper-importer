@@ -1,6 +1,6 @@
 # SRS Product Importer — Zuper
 
-A Next.js wizard that imports the SRS roofing catalog from a Supabase database into any Zuper customer account via the Zuper REST API, then generates Good / Better / Best CPQ proposal templates automatically.
+A Next.js wizard that imports the SRS roofing, gutters, and siding catalog from a Supabase database into any Zuper customer account via the Zuper REST API, then generates Good / Better / Best CPQ proposal templates automatically.
 
 **Live:** https://zuper-importer.vercel.app
 **GitHub:** https://github.com/Dilith-Zuper/zuper-importer
@@ -11,7 +11,7 @@ A Next.js wizard that imports the SRS roofing catalog from a Supabase database i
 
 - **Next.js 14** (App Router, TypeScript)
 - **Tailwind CSS** — warm off-white (`#FAF9F7`) theme, Zuper orange (`#F97316`) accent, Inter font
-- **Zustand** — wizard state across all 8 steps
+- **Zustand** — wizard state across all 9 steps
 - **Supabase JS** (server-side only, service role key) — queries `srs_products` + `srs_variants`
 - **Zuper REST API** — products, categories, warehouse, measurement tokens, CPQ formulas, custom fields, proposal templates
 - **Vercel** — auto-deploys on push to `main`; SSE streaming supported
@@ -58,12 +58,12 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 |---|---|
 | `product_id` | PK |
 | `product_name` | |
-| `product_category` | Uppercase raw category (`SHINGLES`, `HIP AND RIDGE`, etc.) |
-| `proposal_line_item` | Proper-case display category (`Shingles`, `Hip & Ridge Cap`, etc.) |
-| `product_line` | Product series/family name (`Timberline HDZ`, `Duration`, `Landmark PRO`) |
+| `product_category` | Uppercase raw category (`SHINGLES`, `HIP AND RIDGE`, `GUTTER/ALUMINUM/COIL`, `SIDING`, etc.) |
+| `proposal_line_item` | Proper-case display category (`Shingles`, `Hip & Ridge Cap`, `Gutter Sections`, `Siding`, etc.) |
+| `product_line` | Product series/family name (`Timberline HDZ`, `Duration`, `Landmark PRO`, `K-Style`, etc.) |
 | `manufacturer` | Raw manufacturer name |
-| `manufacturer_norm` | Normalized brand (`Gaf`, `Certainteed`, `Owens Corning`) |
-| `is_big3_brand` | Boolean — true for GAF, CertainTeed, Owens Corning |
+| `manufacturer_norm` | Normalized brand (`Gaf`, `Certainteed`, `Owens Corning`, `Berger`, `James Hardie`, etc.) |
+| `is_big3_brand` | Boolean — true for GAF, CertainTeed, Owens Corning (roofing only) |
 | `is_universal` | True = generic accessory included in every brand selection |
 | `exclude_default` | True = skip entirely |
 | `family_tier` | `addon` / `good` / `better` / `best` / null — maps to proposal tiers |
@@ -85,136 +85,137 @@ Vercel project: `dilith-zupers-projects/zuper-importer` · Account: `dilith-zupe
 
 ---
 
-## Product Counts (as of May 2025)
+## Catalog Sizes
 
-| Brand | Total | Universal (is_universal) | Brand-specific |
-|---|---|---|---|
-| GAF | 522 | 111 | 411 |
-| CertainTeed | 495 | 44 | 451 |
-| Owens Corning | 116 | 30 | 86 |
-| Total in DB | 19,807 | 6,873 | 12,934 |
+| Trade | Products | Notes |
+|---|---|---|
+| Roofing | 19,807 | Big 3: GAF 522, CertainTeed 495, Owens Corning 116 |
+| Gutters | 1,230 | Berger, Englert, US Aluminum, Rainstamp, Quality Edge, + others |
+| Siding | 2,438 | James Hardie, CertainTeed, Mastic, Azek, Royal, + others |
 
-**Typical Big 3 upload:** ~1,719 products (1,133 brand-specific + 586 manufacturer-varies universals)
+**Typical Big 3 roofing upload:** ~1,719 products (1,133 brand-specific + 586 manufacturer-varies universals)
+
+---
+
+## Wizard Flow (9 Steps)
+
+### Step 1 — Connect
+- User enters company login name + API key
+- `POST /api/connect` → resolves `dc_api_url` and `company_name` from Zuper auth
+- Stores `baseUrl`, `apiKey`, `companyName` in Zustand
+
+### Step 2 — Trades
+- Multi-select cards: **Roofing** (pre-selected), Gutters, Siding
+- Shows product count and sample brands per trade
+- Roofing can be deselected; at least one trade must remain selected
+- Stores `selectedTrades` in Zustand
+
+### Step 3 — Brands
+- Tabbed per selected trade (tabs only shown when multiple trades selected)
+- **Roofing tab**: Big 3 pre-selected + toggleable; top 9 secondary as tiles; rest in searchable list
+- **Gutters/Siding tabs**: all brands listed by product count, none pre-selected, searchable
+- Stores `selectedBrands`, `selectedGutterBrands`, `selectedSidingBrands`
+
+### Step 4 — Product Lines
+- Tabbed per selected trade
+- **Roofing tab**: non-roofing lines (commercial TPO, solar, insulation, etc.) deselected by default with reason badges; expandable Specialty section with explanatory card + legend
+- **Gutters/Siding tabs**: all lines pre-selected, simple toggle pills
+- Stores `selectedProductLines`, `selectedGutterProductLines`, `selectedSidingProductLines`
+
+### Step 5 — Preview
+- `POST /api/preview` → paginates all matching products across all selected trades, filters by selected product lines
+- Shows brand filter tabs + category breakdown
+- Stores `filteredProductIds[]` (combined across all trades)
+
+### Step 6 — Validate (Pre-flight, 6 checks)
+- `POST /api/validate` → SSE stream
+  1. Categories, 2. Warehouse, 3. Measurement Tokens, 4. CPQ Formulas, 5. UOMs, 6. Product Tier Field (non-blocking)
+
+### Step 7 — Upload
+- `POST /api/upload` → SSE stream
+- Uploads all products across all selected trades in batches of 100
+- Captures `product_uid` from each response → `productIdMap`
+- Color variants uploaded as `option.option_values` with `option_label: "Color"`
+
+### Step 8 — Done
+- Shows uploaded / skipped / error counts
+- Error CSV download
+- "Build Proposal Templates →" advances to Step 9
+
+### Step 9 — Proposal Templates (G/B/B CPQ)
+
+Three phases:
+
+**Phase A — Pre-flight** (`POST /api/proposal-preflight`)
+- Checks for "Roof Inspection" job category, "Create Proposal" status, "Residential Roofing Proposal" layout
+- Layout is optional (amber state) — CPQ works without it
+- Category and status are auto-detected; pickers shown if not found; honest "none exist" messages if account is empty
+
+**Phase B — Package Preview** (`POST /api/proposal-preview`)
+- Roofing: builds G/B/B packages per brand using `family_tier`
+- Gutters: fetches 6 curated items (Gutter Sections, Downspouts, Elbows, End Caps, Inside Corners, Outside Corners) — same across all tiers
+- Siding: fetches one primary product per selected siding brand — same across all tiers
+- Preview cards show roofing tiers + gutter section (sky blue) + siding section (violet)
+
+**Phase C — Creation** (`POST /api/create-proposals`, SSE stream)
+
+For each roofing brand template:
+1. `POST /invoice_estimate/proposal_template` → `template_uid`
+2. `POST /invoice_estimate/proposal_template/{uid}/options?items_type=LINE_ITEMS` → Good/Better/Best option UIDs
+3. `PUT /invoice_estimate/proposal_template/{uid}` → set CPQ trigger + layout + `is_draft: false`
+4. For each option: POST "Material" HEADER → POST roofing items (formula-based quantities)
+5. If gutters selected: POST "Gutter Materials" HEADER → POST gutter items (same in all 3 options)
+6. If siding selected: POST "Siding Materials" HEADER → POST siding items (same in all 3 options)
+
+Formula UIDs fetched live from Zuper at route start (`GET /invoice_estimate/cpq/formulas`). If formula rejected, falls back to `FIXED=1`.
 
 ---
 
 ## Product Tiers (`family_tier` → Zuper "Product Tier" custom field)
 
-| DB `family_tier` | Price | Real meaning | Zuper custom field value |
-|---|---|---|---|
-| `addon` | ~$95 | Economy / entry-level shingles | **Good** |
-| `good` | ~$131 | Standard architectural (most popular) | **Better** |
-| `better` | ~$159 | Enhanced / upgraded architectural | **Best** |
-| `best` | ~$431 | Designer / luxury | **Best** |
-| `null` | — | Universal accessories (always included) | **Default** |
+| DB `family_tier` | Zuper custom field value |
+|---|---|
+| `addon` | Good |
+| `good` | Better |
+| `better` | Best |
+| `best` | Best |
+| `null` | Default |
 
-**GAF:** addon=Royal Sovereign, good=Timberline HDZ, better=Timberline UHDZ, best=Grand Sequoia/Grand Canyon
-**CertainTeed:** addon=Landmark, good=Landmark PRO, better=Belmont, best=Presidential Shake
-**OC:** addon=Oakridge/Supreme, good=Duration, best=Woodcrest/Berkshire
+**Roofing proposal tier mapping:**
+- Good option: `addon` shingles + `addon`→`good` hip&ridge/starter
+- Better option: `good` shingles + `good` hip&ridge/starter
+- Best option: `best` shingles + `best`→`good` hip&ridge/starter
 
----
-
-## Brands That Support G/B/B Proposals (7 brands)
-
-| Brand | Shingle tiers | Hip&Ridge tiers | Starter tiers |
-|---|---|---|---|
-| CertainTeed | 4 (addon/good/better/best) | 3 | 3 |
-| GAF | 4 | 2 | 1 |
-| Owens Corning | 3 (no better) | 2 | 2 |
-| IKO | 4 | 2 | 1 |
-| Atlas | 3 | 2 | 1 |
-| Tamko | 3 | 1 | 1 |
-| Malarkey | 3 | 1 | 2 |
+**Gutters and siding** are `family_tier = better` for 99%+ of products — no meaningful G/B/B differentiation, so the same curated items appear in all three proposal options.
 
 ---
 
-## Wizard Flow (8 Steps)
+## G/B/B Proposal Line Items
 
-### Step 1 — Connect
-- User enters company login name + API key
-- `POST /api/connect` → resolves `dc_api_url` and `company_name` from Zuper auth
-- Stores `baseUrl` (`dc_api_url + '/api/'`), `apiKey`, `companyName` in Zustand
-
-### Step 2 — Brands
-- `GET /api/brands` → paginates `srs_products`, counts per `manufacturer_norm`
-- Big 3 identified via `is_big3_brand = true` column (not string matching)
-- Big 3 pre-selected and toggleable; top 9 secondary as tiles; rest in searchable list
-- Stores `selectedBrands[]` in Zustand
-
-### Step 3 — Product Lines
-- `POST /api/product-lines` → for each selected brand, counts products per `product_line` value
-- Shows product lines as toggle pills per brand — all pre-selected by default
-- **Smart defaults** from cross-reference with Zuper product master dump: non-roofing lines deselected automatically (`lib/product-line-skips.ts`):
-  - GAF: EverGuard (commercial TPO), Timberline Solar/S1, RUBEROID, HydroStop, Drill-Tec, etc.
-  - CertainTeed: Restoration Millwork, Kingston Rail, Solstice (solar), Flintlastic, GlasRoc, etc.
-  - OC: FOAMULAR (insulation), PINK Next Gen, WEARDECK, Thermafiber, etc.
-- Multi-product lines shown prominently; single-product accessory lines collapsed under expandable section
-- Per-brand search box
-- Continue button shows live product count as lines are toggled
-- Stores `selectedProductLines: Record<brand, string[]>` in Zustand
-
-### Step 4 — Preview
-- `POST /api/preview` → paginates all matching products, filters in-memory by selected `product_line`
-- Query: `manufacturer_norm IN (selectedBrands) OR (is_universal=true AND manufacturer_norm ILIKE '%manufacturer varies%')`
-- In-memory filter: only products whose `product_line` is in `selectedProductLines[brand]`
-- Shows brand filter tabs + category breakdown sorted by roofing importance
-- Category sort order: Shingles → Hip & Ridge → Starter → Underlayment → Ice & Water → Vents → Drip Edge → Flashings → Fasteners → Pipes → Decking → Caulk → Gutters → Siding → Commercial → Tools → Other
-- Stores `filteredProductIds[]` in Zustand
-
-### Step 5 — Validate (Pre-flight, 6 checks)
-- `POST /api/validate` → SSE stream
-  1. **Categories** — fetches/creates all required Zuper product categories
-  2. **Warehouse** — finds/creates a WAREHOUSE location
-  3. **Measurement Tokens** — fuzzy-matches 18 roof tokens; creates missing in "Roof Measurements"
-  4. **CPQ Formulas** — checks/creates 25 area measurement formula definitions
-  5. **UOMs** — verifies all mapped units of measure exist in Zuper
-  6. **Product Tier Field** — finds/creates "Product Tier" RADIO custom field on PRODUCT module (**non-blocking** — upload proceeds even if this fails)
-- Returns `categoryMap`, `warehouseUid`, `tokenMap`, `formulaMap`, `productTierFieldUid` to store
-
-### Step 6 — Upload
-- `POST /api/upload` → SSE stream
-- Fetches products + variants from Supabase in paginated 1,000-row chunks
-- Builds Zuper payload per product via `lib/product-builder.ts`:
-  - `product_image: ''` and `option_image: ''` — never sends URLs
-  - Color options from variants, capped at 50
-  - CPQ formula linked via `proposal_line_item → formula_key → uid`
-  - `meta_data` includes "Product Tier" RADIO field with mapped value (Good/Better/Best/Default)
-- Uploads **100 products concurrently** per batch (`Promise.allSettled`), 3s between batches
-- **Captures `product_uid` from each Zuper response** → builds `productIdMap: { srs_product_id → zuper_product_uid }`
-- `productIdMap` returned in SSE `done` event and stored in Zustand — used in Step 8 for proposal line items
-
-### Step 7 — Done
-- Shows uploaded / skipped / error counts with colored stat cards
-- Error CSV download
-- **"Build Proposal Templates →"** advances to Step 8
-- "Start New Import" resets store
-
-### Step 8 — Proposal Templates (G/B/B CPQ)
-Three phases:
-
-**Phase A — Pre-flight** (`POST /api/proposal-preflight`)
-- Checks Zuper account for required resources:
-  - "Roof Inspection" job category → `categoryUid`
-  - "Create Proposal" job status within that category → `statusUid`
-  - "Residential Roofing Proposal" layout template → `layoutUid`
-- If any not found: shows picker UI listing available options
-
-**Phase B — Package Preview** (`POST /api/proposal-preview`)
-- Filters to eligible brands (have shingles in 2+ tiers within selected product lines)
-- Assembles Good / Better / Best packages per brand using tier mapping:
-  - Good: `addon` shingles + `addon`→`good` hip&ridge/starter + `good` accessories
-  - Better: `good` shingles + `good` hip&ridge/starter + `good` accessories
-  - Best: `best` shingles + `best`→`good` hip&ridge/starter + `good` accessories
-  - Universal: drip edge + coil nails from manufacturer-varies universals
-- `primary_item = true` products preferred; falls back to first in tier
-- User can edit template name and description per brand
-
-**Phase C — Creation** (`POST /api/create-proposals`, SSE stream)
-For each brand package:
-1. `POST /invoice_estimate/proposal_template` → `template_uid`
-2. `POST /invoice_estimate/proposal_template/{uid}/options?items_type=LINE_ITEMS` → creates Good/Better/Best options, get `option_uid` for each
-3. `PUT /invoice_estimate/proposal_template/{uid}` → set CPQ trigger (category + status) + layout + `is_draft: false`
-4. For each option: `POST HEADER` line item → get `section_uid`, then `POST ITEM` for each product using `productIdMap` for Zuper product UID and `formulaMap` for CPQ formula (falls back to `FIXED=1` if no formula)
+| Item | Varies by tier? | Formula |
+|---|---|---|
+| Shingles | Yes | `shingles_squares` |
+| Hip & Ridge Cap | Yes | `hip_ridge_cap_bundles` |
+| Starter Strip | Yes | `starter_strip_bundles` |
+| Underlayment | No | `underlayment_synthetic_rolls` |
+| Ice & Water | No | `ice_and_water_shield_rolls` |
+| Vent | No | varies |
+| Drip Edge | No (universal) | `drip_edge_pieces` |
+| Step Flashing | No (universal) | `step_flashing_pieces` |
+| W-Valley | No (universal) | `valley_metal_pieces` |
+| Counter/Headwall Flashing | No (universal) | `headwall_flashing_pieces` |
+| Pipe Boot 3" | No (universal) | FIXED=1 |
+| Coil Nails | No (universal) | `coil_nails_boxes` |
+| Plastic Cap Nails | No (universal) | `plastic_cap_nails_boxes` |
+| Fasteners | No (universal) | FIXED=1 |
+| Caulk / Sealant | No (universal) | FIXED=1 |
+| **Gutter Sections** | No (if gutters trade selected) | `gutter_sections_pieces` |
+| **Downspouts** | No | `downspouts_count` |
+| **Gutter Elbows** | No | `gutter_elbows_count` |
+| **Gutter End Caps** | No | `gutter_end_caps_count` |
+| **Gutter Inside Corners** | No | `gutter_inside_corners_count` |
+| **Gutter Outside Corners** | No | `gutter_outside_corners_count` |
+| **Siding** | No (if siding trade selected) | `siding_squares` |
 
 ---
 
@@ -223,14 +224,14 @@ For each brand package:
 | Route | Method | Description |
 |---|---|---|
 | `/api/connect` | POST | Validate Zuper credentials, return baseUrl + companyName |
-| `/api/brands` | GET | Return Big 3, top secondary, other brands with product counts |
-| `/api/product-lines` | POST | Return product lines per brand with counts |
-| `/api/preview` | POST | Fetch + filter products, return IDs and category breakdown |
-| `/api/validate` | POST | SSE — 6 pre-flight checks, find/create Zuper resources |
+| `/api/brands` | POST | Return brands for a given trade (`{trade: 'roofing'|'gutters'|'siding'}`) |
+| `/api/product-lines` | POST | Return product lines per brand, filtered by trade category |
+| `/api/preview` | POST | Fetch + filter products across all selected trades |
+| `/api/validate` | POST | SSE — 6 pre-flight checks |
 | `/api/upload` | POST | SSE — build payloads, upload products, return productIdMap |
 | `/api/proposal-preflight` | POST | Check job category, status, layout template in Zuper |
-| `/api/proposal-preview` | POST | Assemble G/B/B packages from DB for eligible brands |
-| `/api/create-proposals` | POST | SSE — create CPQ proposal templates in Zuper |
+| `/api/proposal-preview` | POST | Assemble G/B/B packages + gutter/siding curated items |
+| `/api/create-proposals` | POST | SSE — create CPQ proposal templates with all trade sections |
 
 ---
 
@@ -238,9 +239,10 @@ For each brand package:
 
 | File | Purpose |
 |---|---|
-| `lib/product-builder.ts` | Builds Zuper product JSON payload from SRS product + variants |
+| `lib/product-builder.ts` | Builds Zuper product JSON payload; includes color options as `option.option_values` with `option_label: "Color"` |
 | `lib/category-norm.ts` | Maps uppercase `product_category` → proper-case display names |
 | `lib/product-line-skips.ts` | Per-brand prefix lists for non-roofing lines to deselect by default |
+| `lib/product-line-categories.ts` | Maps skip prefixes to human-readable reason categories (Commercial Roofing, Solar, Insulation, etc.) with Tailwind badge colours |
 | `lib/formula-definitions.ts` | 25 CPQ formula definitions with expression maps + ITEM_TO_FORMULA_KEY |
 | `lib/token-definitions.ts` | 18 required roof measurement tokens |
 | `lib/uom-map.ts` | SRS UOM codes → Zuper UOM values |
@@ -250,11 +252,23 @@ For each brand package:
 
 ## Key Technical Decisions
 
+**Multi-trade architecture**
+Each trade (roofing, gutters, siding) has its own brand + product line selection stored separately in Zustand. All selected product IDs are combined into a single `filteredProductIds` array for upload — one upload pass handles all trades. Proposal templates are created per roofing brand with optional gutter/siding sections appended.
+
 **POST routes + fetch streaming (not EventSource)**
 All long-running routes use `POST` with JSON body + `ReadableStream` SSE. `EventSource` is GET-only and silently truncated 1,200+ product IDs in the URL.
 
+**Formula field name: `formula` not `formula_uid`**
+Zuper's line item API expects `{ quantity_type: "FORMULA", formula: "<uid>" }`. `formula_uid` is silently rejected. Live formula map is fetched fresh from `GET /invoice_estimate/cpq/formulas` at proposal creation time rather than relying on the cached Zustand value.
+
+**FIXED fallback for formula rejections**
+If a formula-type line item is rejected (e.g. formula UID not found in account), the item is automatically retried as `quantity_type: FIXED, quantity: 1`.
+
 **No images sent to Zuper**
 `product_image` and `option_image` always `''`. Zuper rejects many SRS image URLs.
+
+**Color options: `option_label: "Color"`**
+Products are uploaded with `option.option_label = "Color"` and `option.customer_selection = true` for any product with 1+ color variants. Products with zero colors get `customer_selection: false`.
 
 **Color options capped at 50**
 Zuper enforces a 50-option limit per product.
@@ -269,22 +283,26 @@ String matching only matched 8 products due to DB storing `'GAF'` vs `'Gaf'`.
 `is_universal=true` covers 6,873 products. Only `manufacturer_norm ILIKE '%manufacturer varies%'` (586 products) are included to avoid bloat.
 
 **Product line smart defaults from Zuper master dump**
-Cross-referenced SRS catalog against Zuper product master dump (us_east + us_west CSVs, 35,195 products). Non-roofing lines deselected by default in Step 3.
+Cross-referenced SRS catalog against Zuper product master dump (us_east + us_west CSVs, 35,195 products across 54 accounts). Non-roofing lines deselected by default in Step 4 with reason badges (Commercial Roofing, Solar, Insulation, Interior Products, etc.). Gutters/siding lines are all pre-selected since no skip logic applies.
 
 **Product Tier custom field is non-blocking**
-If Check 6 fails, upload proceeds without setting the tier field. `productTierFieldUid = ''` causes the meta_data entry to be omitted.
+If Check 6 fails, upload proceeds without setting the tier field.
 
 **productIdMap captured during upload**
-Each successful Zuper upload response includes `data.product_uid`. These are accumulated into `productIdMap: { srs_product_id → zuper_product_uid }` and stored in Zustand for use in Step 8 proposal line items.
+Each successful Zuper upload response includes `data.product_uid`. Accumulated into `productIdMap: { srs_product_id → zuper_product_uid }` for use in Step 9 proposal line items.
 
-**G/B/B proposal option creation**
-Options (Good/Better/Best) are created explicitly via `POST /options?items_type=LINE_ITEMS` after the template is created. Line items use `quantity_type: FORMULA` with the pre-set CPQ formula UIDs; falls back to `FIXED=1` if no formula exists for the item.
+**Gutter/siding proposal sections identical across G/B/B**
+99%+ of gutter and siding products have `family_tier = better` with no tier differentiation. The same curated items appear in Good, Better, and Best options. Only the roofing section changes between tiers.
+
+**Section UID extraction**
+The HEADER line item POST returns `data` as an array. Section UID is extracted via `Array.isArray(hd) ? hd[0]?.uid : hd?.uid` (with fallbacks for `section_uid` and `line_item_uid` field names).
 
 ---
 
 ## Known Limitations
 
-- **Vercel free tier** has a 60s function timeout. Parallel batches of 100 typically finish well under this for ~1,700 products. Very large selections or slow Zuper APIs may timeout.
+- **Vercel free tier** has a 60s function timeout. Parallel batches of 100 typically finish well under this for ~1,700 products. Very large multi-trade selections may approach the limit.
 - Products with >50 color variants are silently capped at 50.
-- `productIdMap` is populated during upload. If products were imported in a previous session, Step 8 won't have their UIDs — run a fresh import to use the proposal builder.
-- If "Residential Roofing Proposal" layout template or "Roof Inspection" job category don't exist in the Zuper account, the user is prompted to pick from available options.
+- `productIdMap` is populated during upload. If products were imported in a previous session, Step 9 won't have their UIDs — run a fresh import to use the proposal builder.
+- Gutters and siding have no G/B/B tier differentiation in the DB — all three proposal options receive identical gutter/siding sections.
+- If roofing brands don't have shingles in 2+ tiers within selected product lines, that brand is excluded from proposal template creation.
