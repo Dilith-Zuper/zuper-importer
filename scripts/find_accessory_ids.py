@@ -3,11 +3,24 @@ Query Supabase srs_products to find representative accessory product IDs.
 Targets: Drip Edge, Underlayment, Nails/Fasteners, Flashing, Pipe Boots, Ridge Vent, Starter Strip.
 Preference: TopShield, Grip-Rite, Lomanco, DMI, Berger, National Nail brands.
 """
-import sys, io, json, urllib.request, urllib.parse
+import sys, io, json, os, urllib.request, urllib.parse
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-SUPABASE_URL = 'https://kbdczzldmyayliwajwma.supabase.co'
-SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiZGN6emxkbXlheWxpd2Fqd21hIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzU1NzE2NCwiZXhwIjoyMDkzMTMzMTY0fQ.41AJIEniPYfhJjXIrmN21ZQ8zufpKuZZ01004ZtNj6M'
+def _load_env():
+    env_path = os.path.join(os.path.dirname(__file__), '..', '.env.local')
+    try:
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, v = line.split('=', 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+    except FileNotFoundError:
+        pass
+
+_load_env()
+SUPABASE_URL = os.environ['SUPABASE_URL']
+SUPABASE_KEY = os.environ['SUPABASE_SERVICE_KEY']
 
 HEADERS = {
     'apikey': SUPABASE_KEY,
