@@ -13,38 +13,38 @@ export async function POST(req: NextRequest) {
       trade?: string
     }
 
+    if (!selectedBrands || selectedBrands.length === 0) {
+      return NextResponse.json({})
+    }
+
+    // Single batch query for all brands — then group in JS
+    let query = supabase
+      .from('srs_products')
+      .select('manufacturer_norm, product_line')
+      .in('manufacturer_norm', selectedBrands)
+      .eq('exclude_default', false)
+      .not('product_line', 'is', null)
+      .limit(50000)
+
+    if (trade !== 'roofing' && TRADE_CATEGORY[trade]) {
+      query = query.eq('product_category', TRADE_CATEGORY[trade])
+    }
+
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+
+    // Group by brand → product line with counts
+    const grouped: Record<string, Record<string, number>> = {}
+    for (const row of data) {
+      const brand = row.manufacturer_norm as string
+      const line  = row.product_line as string
+      if (!grouped[brand]) grouped[brand] = {}
+      grouped[brand][line] = (grouped[brand][line] ?? 0) + 1
+    }
+
     const result: Record<string, { line: string; count: number }[]> = {}
-
     for (const brand of selectedBrands) {
-      const counts: Record<string, number> = {}
-      let from = 0
-      const PAGE = 1000
-
-      while (true) {
-        let query = supabase
-          .from('srs_products')
-          .select('product_line')
-          .eq('manufacturer_norm', brand)
-          .eq('exclude_default', false)
-
-        // For gutters/siding, also filter to that category
-        if (trade !== 'roofing' && TRADE_CATEGORY[trade]) {
-          query = query.eq('product_category', TRADE_CATEGORY[trade])
-        }
-
-        const { data, error } = await query.range(from, from + PAGE - 1)
-        if (error) throw new Error(error.message)
-
-        for (const row of data) {
-          const line = row.product_line as string
-          if (line) counts[line] = (counts[line] ?? 0) + 1
-        }
-
-        if (data.length < PAGE) break
-        from += PAGE
-      }
-
-      result[brand] = Object.entries(counts)
+      result[brand] = Object.entries(grouped[brand] ?? {})
         .map(([line, count]) => ({ line, count }))
         .sort((a, b) => b.count - a.count)
     }

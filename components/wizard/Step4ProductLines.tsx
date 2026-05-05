@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
+import { getProductLines } from '@/lib/brands-cache'
 import { shouldSkipByDefault } from '@/lib/product-line-skips'
 import { getSkipCategory, CATEGORY_DEFS } from '@/lib/product-line-categories'
 import type { Trade } from '@/types/wizard'
@@ -178,26 +179,27 @@ export function Step4ProductLines() {
   const [loading, setLoading]             = useState(true)
 
   useEffect(() => {
-    const fetches: Promise<void>[] = []
-    const fetchLines = (brands: string[], trade: string, setter: (d: Record<string, LineItem[]>) => void, selSetter: (d: Record<string, Set<string>>) => void, preSelectAll = false) => {
-      if (!brands.length) return
-      fetches.push(
-        fetch('/api/product-lines', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectedBrands: brands, trade }) })
-          .then(r => r.json()).then((d: Record<string, LineItem[]>) => {
-            setter(d)
-            const init: Record<string, Set<string>> = {}
-            for (const [brand, lines] of Object.entries(d)) {
-              init[brand] = preSelectAll
-                ? new Set(lines.map(l => l.line))
-                : new Set(lines.filter(l => !shouldSkipByDefault(brand, l.line)).map(l => l.line))
-            }
-            selSetter(init)
-          })
-      )
+    const applyLines = (d: Record<string, LineItem[]>, setter: (d: Record<string, LineItem[]>) => void, selSetter: (d: Record<string, Set<string>>) => void, preSelectAll = false) => {
+      setter(d)
+      const init: Record<string, Set<string>> = {}
+      for (const [brand, lines] of Object.entries(d)) {
+        init[brand] = preSelectAll
+          ? new Set(lines.map(l => l.line))
+          : new Set(lines.filter(l => !shouldSkipByDefault(brand, l.line)).map(l => l.line))
+      }
+      selSetter(init)
     }
-    if (selectedTrades.includes('roofing')) fetchLines(selectedBrands, 'roofing', setBrandLines, setRoofSelected, false)
-    if (selectedTrades.includes('gutters')) fetchLines(selectedGutterBrands, 'gutters', setGutterLines, setGutterSel, true)
-    if (selectedTrades.includes('siding'))  fetchLines(selectedSidingBrands, 'siding', setSidingLines, setSidingSel, true)
+
+    const fetches: Promise<void>[] = []
+    if (selectedTrades.includes('roofing') && selectedBrands.length) {
+      fetches.push(getProductLines(selectedBrands, 'roofing').then((d: any) => applyLines(d, setBrandLines, setRoofSelected, false)))
+    }
+    if (selectedTrades.includes('gutters') && selectedGutterBrands.length) {
+      fetches.push(getProductLines(selectedGutterBrands, 'gutters').then((d: any) => applyLines(d, setGutterLines, setGutterSel, true)))
+    }
+    if (selectedTrades.includes('siding') && selectedSidingBrands.length) {
+      fetches.push(getProductLines(selectedSidingBrands, 'siding').then((d: any) => applyLines(d, setSidingLines, setSidingSel, true)))
+    }
     Promise.all(fetches).then(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

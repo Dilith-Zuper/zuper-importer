@@ -1,6 +1,7 @@
 'use client'
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
+import { prefetchBrands } from '@/lib/brands-cache'
 import type { Trade } from '@/types/wizard'
 
 // SVG icons per trade — inline to keep component self-contained
@@ -48,6 +49,13 @@ const TRADE_DEFS: { id: Trade; label: string; description: string; count: string
 
 export function Step2Trades() {
   const { companyName, selectedTrades, setSelectedTrades, setStep } = useWizardStore()
+
+  // Warm up all three brand lists while user reads this page
+  useEffect(() => {
+    prefetchBrands('roofing')
+    prefetchBrands('gutters')
+    prefetchBrands('siding')
+  }, [])
 
   const toggle = (id: Trade) => {
     const current = new Set(selectedTrades)

@@ -12,28 +12,23 @@ export async function POST(req: NextRequest) {
   try {
     const { trade = 'roofing' } = await req.json() as { trade?: string }
 
-    // ── Gutters / Siding ── simple brand list by product count ──────────────
+    // ── Gutters / Siding ── single query, group in JS ──────────────────────────
     if (trade === 'gutters' || trade === 'siding') {
       const category = TRADE_CATEGORY[trade]
+      const { data, error } = await supabase
+        .from('srs_products')
+        .select('manufacturer_norm')
+        .eq('product_category', category)
+        .eq('exclude_default', false)
+        .not('manufacturer_norm', 'is', null)
+        .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
+        .limit(5000)
+      if (error) throw new Error(error.message)
+
       const counts: Record<string, number> = {}
-      let from = 0
-      const PAGE = 1000
-      while (true) {
-        const { data, error } = await supabase
-          .from('srs_products')
-          .select('manufacturer_norm')
-          .eq('product_category', category)
-          .eq('exclude_default', false)
-          .not('manufacturer_norm', 'is', null)
-          .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
-          .range(from, from + PAGE - 1)
-        if (error) throw new Error(error.message)
-        for (const row of data) {
-          const b = row.manufacturer_norm as string
-          counts[b] = (counts[b] ?? 0) + 1
-        }
-        if (data.length < PAGE) break
-        from += PAGE
+      for (const row of data) {
+        const b = row.manufacturer_norm as string
+        counts[b] = (counts[b] ?? 0) + 1
       }
       const brands = Object.entries(counts)
         .map(([name, count]) => ({ name, count }))
@@ -41,27 +36,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ brands })
     }
 
-    // ── Roofing ── existing Big3 + secondary structure ──────────────────────
+    // ── Roofing ── single query across all products, group in JS ───────────────
+    const { data, error } = await supabase
+      .from('srs_products')
+      .select('manufacturer_norm, is_big3_brand')
+      .eq('exclude_default', false)
+      .not('manufacturer_norm', 'is', null)
+      .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
+      .limit(25000)
+    if (error) throw new Error(error.message)
+
     const counts: Record<string, number> = {}
     const big3Flag: Record<string, boolean> = {}
-    let from = 0
-    const PAGE = 1000
-    while (true) {
-      const { data, error } = await supabase
-        .from('srs_products')
-        .select('manufacturer_norm, is_big3_brand')
-        .eq('exclude_default', false)
-        .not('manufacturer_norm', 'is', null)
-        .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
-        .range(from, from + PAGE - 1)
-      if (error) throw new Error(error.message)
-      for (const row of data) {
-        const b = row.manufacturer_norm as string
-        counts[b] = (counts[b] ?? 0) + 1
-        if (row.is_big3_brand) big3Flag[b] = true
-      }
-      if (data.length < PAGE) break
-      from += PAGE
+    for (const row of data) {
+      const b = row.manufacturer_norm as string
+      counts[b] = (counts[b] ?? 0) + 1
+      if (row.is_big3_brand) big3Flag[b] = true
     }
 
     const allBrands = Object.entries(counts)

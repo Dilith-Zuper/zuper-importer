@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
+import { getBrands, prefetchProductLines } from '@/lib/brands-cache'
 import { BrandTile } from '@/components/ui/BrandTile'
 import type { Trade } from '@/types/wizard'
 
@@ -68,34 +69,53 @@ export function Step3Brands() {
 
   const [loading, setLoading] = useState(true)
 
+  // Load brands from cache (populated by Step2 prefetch, or fetch fresh)
   useEffect(() => {
     const fetches: Promise<void>[] = []
 
     if (selectedTrades.includes('roofing')) {
       fetches.push(
-        fetch('/api/brands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trade: 'roofing' }) })
-          .then(r => r.json()).then(d => {
-            const b3: BrandItem[] = d.big3 ?? []
-            setBig3(b3); setTopSecondary(d.topSecondary ?? []); setOtherBrands(d.otherBrands ?? [])
-            setRoofingSelected(new Set(b3.map((b: BrandItem) => b.name)))
-          })
+        getBrands('roofing').then((d: any) => {
+          const b3: BrandItem[] = d.big3 ?? []
+          setBig3(b3); setTopSecondary(d.topSecondary ?? []); setOtherBrands(d.otherBrands ?? [])
+          setRoofingSelected(new Set(b3.map((b: BrandItem) => b.name)))
+        })
       )
     }
     if (selectedTrades.includes('gutters')) {
-      fetches.push(
-        fetch('/api/brands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trade: 'gutters' }) })
-          .then(r => r.json()).then(d => setGutterBrands(d.brands ?? []))
-      )
+      fetches.push(getBrands('gutters').then((d: any) => setGutterBrands(d.brands ?? [])))
     }
     if (selectedTrades.includes('siding')) {
-      fetches.push(
-        fetch('/api/brands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trade: 'siding' }) })
-          .then(r => r.json()).then(d => setSidingBrands(d.brands ?? []))
-      )
+      fetches.push(getBrands('siding').then((d: any) => setSidingBrands(d.brands ?? [])))
     }
 
     Promise.all(fetches).then(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounce-prefetch product lines as user selects brands (before they click Continue)
+  useEffect(() => {
+    if (roofingSelected.size === 0) return
+    const timer = setTimeout(() => {
+      prefetchProductLines(Array.from(roofingSelected), 'roofing')
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [roofingSelected])
+
+  useEffect(() => {
+    if (gutterSelected.size === 0) return
+    const timer = setTimeout(() => {
+      prefetchProductLines(Array.from(gutterSelected), 'gutters')
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [gutterSelected])
+
+  useEffect(() => {
+    if (sidingSelected.size === 0) return
+    const timer = setTimeout(() => {
+      prefetchProductLines(Array.from(sidingSelected), 'siding')
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [sidingSelected])
 
   const toggleRoofing = (name: string) => setRoofingSelected(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
   const toggleGutter  = (name: string) => setGutterSelected(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
