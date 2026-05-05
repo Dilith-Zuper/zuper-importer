@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { CATEGORY_NORM } from '@/lib/category-norm'
+import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 
 const GUTTER_CATEGORY = 'GUTTER/ALUMINUM/COIL'
 const SIDING_CATEGORY = 'SIDING'
@@ -90,6 +91,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Fetch universal accessory products ────────────────────────────────────
+    const { data: accessories } = await supabase
+      .from('srs_products')
+      .select('product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price')
+      .in('product_id', ACCESSORY_PRODUCT_IDS)
+    if (accessories) allProducts.push(...accessories)
+
     // ── Deduplicate by product_id ─────────────────────────────────────────────
     const seen = new Set<number>()
     const deduped = allProducts.filter(p => { if (seen.has(p.product_id)) return false; seen.add(p.product_id); return true })
@@ -123,10 +131,14 @@ export async function POST(req: NextRequest) {
       byCategory[key] = (byCategory[key] ?? 0) + 1
     }
 
+    const accessoryIds = new Set(ACCESSORY_PRODUCT_IDS)
+    const accessoryCount = filtered.filter(p => accessoryIds.has(p.product_id)).length
+
     return NextResponse.json({
       products: filtered,
       productIds: filtered.map(p => p.product_id),
       counts: { total: filtered.length, byCategory },
+      accessoryCount,
     })
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

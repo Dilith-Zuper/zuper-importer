@@ -76,6 +76,7 @@ export function Step4Preview() {
   } = useWizardStore()
   const [products, setProducts] = useState<Product[]>([])
   const [counts, setCounts] = useState<{ total: number; byCategory: Record<string, number> }>({ total: 0, byCategory: {} })
+  const [accessoryCount, setAccessoryCount] = useState(0)
   const [activeBrand, setActiveBrand] = useState<string>('all')
   const [loading, setLoading] = useState(true)
 
@@ -92,6 +93,7 @@ export function Step4Preview() {
     }).then(r => r.json()).then(d => {
       setProducts(d.products ?? [])
       setCounts(d.counts ?? { total: 0, byCategory: {} })
+      setAccessoryCount(d.accessoryCount ?? 0)
       setLoading(false)
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -145,6 +147,20 @@ export function Step4Preview() {
         <p className="text-5xl font-extrabold text-orange-500">{counts.total.toLocaleString()}</p>
         <p className="text-gray-400 mt-1">products across <span className="text-gray-600 font-semibold">{Object.keys(counts.byCategory).length}</span> categories</p>
       </div>
+
+      {/* Accessory callout */}
+      {accessoryCount > 0 && (
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4">
+          <svg className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" />
+          </svg>
+          <p className="text-sm text-blue-700">
+            Includes <span className="font-semibold">{accessoryCount} universal accessories</span> automatically added to every import —
+            drip edge, underlayment, coil nails, step flashing, valley metal, pipe boots, ridge vent, starter strip, and caulk.
+            These are the same for all accounts regardless of brand.
+          </p>
+        </div>
+      )}
 
       {/* Brand tabs */}
       <div className="flex gap-2 flex-wrap">

@@ -4,6 +4,7 @@ import { fetchWithRetry, zuperHeaders, chunks, sleep } from '@/lib/zuper-fetch'
 import { buildProductPayload, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
 import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
+import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -28,11 +29,14 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
 
       try {
+        // Merge universal accessory IDs into the upload batch (deduplicated)
+        const allProductIds = [...new Set([...ACCESSORY_PRODUCT_IDS, ...productIds])]
+
         // Fetch all products + their unrestricted variants
         const PAGE = 1000
         const allProducts: SrsProduct[] = []
-        for (let from = 0; from < productIds.length; from += PAGE) {
-          const chunk = productIds.slice(from, from + PAGE)
+        for (let from = 0; from < allProductIds.length; from += PAGE) {
+          const chunk = allProductIds.slice(from, from + PAGE)
           const { data, error } = await supabase
             .from('srs_products')
             .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, proposal_line_item, family_tier')
@@ -42,8 +46,8 @@ export async function POST(req: NextRequest) {
         }
 
         const allVariants: SrsVariant[] = []
-        for (let from = 0; from < productIds.length; from += 500) {
-          const chunk = productIds.slice(from, from + 500)
+        for (let from = 0; from < allProductIds.length; from += 500) {
+          const chunk = allProductIds.slice(from, from + 500)
           const { data, error } = await supabase
             .from('srs_variants')
             .select('variant_id, product_id, color_name, size_name, variant_image_url, is_restricted')
