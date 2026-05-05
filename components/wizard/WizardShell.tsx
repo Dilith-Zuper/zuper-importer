@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
 import { NoToast } from '@/components/ui/NoToast'
 import { GuidePanel } from '@/components/ui/GuidePanel'
@@ -28,18 +28,18 @@ const STEPS = [
 export function WizardShell() {
   const { step } = useWizardStore()
   const [toastReason, setToastReason] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [guideOpen, setGuideOpen] = useState(false)
+  const logoClickCount = useRef(0)
+  const logoClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function askDoubt() {
-    setGuideOpen(true)
-    if (loading) return
-    setLoading(true)
-    try {
-      const d = await fetch('/api/no').then(r => r.json())
-      setToastReason(d.reason ?? '')
-    } catch { setToastReason('No answer available right now.') }
-    setLoading(false)
+  function handleLogoClick() {
+    logoClickCount.current += 1
+    if (logoClickTimer.current) clearTimeout(logoClickTimer.current)
+    logoClickTimer.current = setTimeout(() => { logoClickCount.current = 0 }, 600)
+    if (logoClickCount.current >= 3) {
+      logoClickCount.current = 0
+      fetch('/api/no').then(r => r.json()).then(d => setToastReason(d.reason ?? '')).catch(() => {})
+    }
   }
 
   return (
@@ -48,7 +48,7 @@ export function WizardShell() {
       <header className="bg-white border-b border-[#E5E2DC] h-16 flex items-center px-6">
         <div className="w-full max-w-[760px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/zuper-logo.svg" alt="Zuper" height={28} className="h-7 w-auto" />
+            <img src="/zuper-logo.svg" alt="Zuper" height={28} className="h-7 w-auto cursor-pointer select-none" onClick={handleLogoClick} />
             <span className="text-[#E5E2DC] select-none">|</span>
             <span className="text-sm font-medium text-gray-500">SRS Product Importer</span>
             <span className="text-[#E5E2DC] select-none">·</span>
@@ -56,11 +56,10 @@ export function WizardShell() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={askDoubt}
-              disabled={loading}
-              className="text-xs font-medium text-gray-400 hover:text-orange-500 transition-colors disabled:opacity-50 underline underline-offset-2"
+              onClick={() => setGuideOpen(true)}
+              className="text-xs font-medium text-gray-400 hover:text-orange-500 transition-colors underline underline-offset-2"
             >
-              {loading ? 'Asking…' : 'Do you have any doubts? Ask here'}
+              Do you have any doubts? Ask here
             </button>
             <span className="bg-orange-50 text-orange-600 text-xs font-semibold px-3 py-1.5 rounded-full">
               Step {step} of {STEPS.length}
