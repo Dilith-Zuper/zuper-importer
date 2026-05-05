@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
 import { NoToast } from '@/components/ui/NoToast'
+import { GuidePanel } from '@/components/ui/GuidePanel'
 import { Step1Connect }      from './Step1Connect'
 import { Step2Trades }       from './Step2Trades'
 import { Step3Brands }       from './Step3Brands'
@@ -28,8 +29,10 @@ export function WizardShell() {
   const { step } = useWizardStore()
   const [toastReason, setToastReason] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
 
   async function askDoubt() {
+    setGuideOpen(true)
     if (loading) return
     setLoading(true)
     try {
@@ -102,6 +105,9 @@ export function WizardShell() {
           </div>
         </div>
       </div>
+
+      {/* Guide panel */}
+      <GuidePanel step={step} open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       {/* Toast */}
       {toastReason !== null && (
