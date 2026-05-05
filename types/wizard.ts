@@ -27,7 +27,7 @@ export interface UploadError {
 }
 
 export interface ValidationResult {
-  check: 'categories' | 'warehouse' | 'tokens' | 'formulas' | 'uoms' | 'tier_field'
+  check: 'categories' | 'warehouse' | 'tokens' | 'formulas' | 'uoms' | 'tier_field' | 'service_categories'
   status: 'pending' | 'running' | 'pass' | 'fail'
   detail: string
 }
@@ -59,6 +59,7 @@ export interface WizardState {
   tokenMap: Record<string, TokenInfo>
   formulaMap: Record<string, string>
   productTierFieldUid: string
+  serviceCategoryMap: Record<string, string>  // category_key → zuper category_uid
   // Step 7 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
   productIdMap: Record<string, string>

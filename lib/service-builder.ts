@@ -1,0 +1,50 @@
+import type { ServiceDef } from './service-catalog'
+
+export function buildServicePayload(service: ServiceDef, categoryUid: string) {
+  return {
+    product: {
+      prefix: '',
+      product_name: service.name,
+      product_id: service.id,
+      is_available: true,
+      product_category: categoryUid,
+      price: service.price,
+      min_quantity: 0,
+      currency: '',
+      quantity: 0,
+      product_manual_link: '',
+      product_description: `<p>${service.description}</p>`,
+      product_image: '',
+      product_type: 'SERVICE',
+      pricing_level: 'ROLLUP',
+      purchase_price: null,
+      brand: '',
+      track_quantity: true,
+      specification: '',
+      has_custom_tax: false,
+      meta_data: [
+        { hide_field: false, hide_to_fe: false, id: 0, label: 'Color', read_only: false, type: 'MULTI_LINE', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
+        { hide_field: false, hide_to_fe: false, id: 1, label: 'Color Selected', read_only: false, type: 'SINGLE_LINE', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
+        { hide_field: false, hide_to_fe: false, id: 2, label: 'Color Selection Mandatory', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
+        { hide_field: false, hide_to_fe: false, id: 3, label: 'Display Color Selection', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
+      ],
+      uom: '',
+      is_billable: true,
+      consider_profitability: true,
+      is_commissionable: true,
+      service_type: service.service_type,
+      bu_uids: null,
+      location_availability: [],
+      tax: { tax_exempt: false, tax_name: '', tax_rate: '' },
+      markup: null,
+      product_files: [],
+      option: {
+        customer_selection: false,
+        mandate_customer_selection: false,
+        option_label: 'Option',
+        option_values: [],
+      },
+    },
+    vendor: [],
+  }
+}

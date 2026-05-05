@@ -4,16 +4,18 @@ import { fetchWithRetry, zuperHeaders, bestZuperMatch, type ZuperToken } from '@
 import { REQUIRED_TOKENS } from '@/lib/token-definitions'
 import { FORMULA_DEFINITIONS } from '@/lib/formula-definitions'
 import { UOM_MAP } from '@/lib/uom-map'
+import { SERVICE_CATEGORY_LABELS } from '@/lib/service-catalog'
 import type { TokenInfo } from '@/types/wizard'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
-  const { baseUrl, apiKey, productIds } = await req.json() as {
+  const { baseUrl, apiKey, productIds, selectedTrades = ['roofing'] } = await req.json() as {
     baseUrl: string
     apiKey: string
     productIds: number[]
+    selectedTrades?: string[]
   }
 
   const encoder = new TextEncoder()
@@ -273,8 +275,51 @@ export async function POST(req: NextRequest) {
           enqueue({ check: 'tier_field', status: 'fail', detail: `Optional: ${(e as Error).message}` })
         }
 
+        // ── Check 7: Service Categories ───────────────────────────────────────
+        enqueue({ check: 'service_categories', status: 'running', detail: 'Checking service categories…' })
+        const serviceCategoryMap: Record<string, string> = {}
+        try {
+          // Fetch all existing product categories once
+          const catRes = await fetchWithRetry(`${baseUrl}products/category?count=100&page=1`, { headers: zuperHeaders(apiKey) })
+          const existing: Record<string, string> = {}
+          for (const c of (catRes.json?.data ?? []).filter((c: { is_deleted?: boolean }) => !c.is_deleted)) {
+            const uid = c.category_uid ?? c.product_category_uid ?? c.uid ?? ''
+            if (uid) existing[(c.category_name as string).toLowerCase()] = uid
+          }
+
+          // Determine which service categories are needed based on selected trades
+          const tradeToKey: Record<string, string> = {
+            roofing: 'roofing-services',
+            gutters: 'gutter-services',
+            siding:  'siding-services',
+          }
+          let created = 0
+          for (const trade of selectedTrades) {
+            const key = tradeToKey[trade]
+            if (!key) continue
+            const label = SERVICE_CATEGORY_LABELS[key]
+            if (existing[label.toLowerCase()]) {
+              serviceCategoryMap[key] = existing[label.toLowerCase()]
+            } else {
+              const r = await fetchWithRetry(`${baseUrl}products/category`, {
+                method: 'POST',
+                headers: zuperHeaders(apiKey),
+                body: JSON.stringify({ product_category: { category_name: label, category_description: '', bu_uids: [], parent_category_uid: null } }),
+              })
+              const uid = r.json?.data?.category_uid ?? r.json?.data?.product_category_uid ?? ''
+              if (!uid) throw new Error(`Failed to create category: ${label}`)
+              serviceCategoryMap[key] = uid
+              created++
+            }
+          }
+          enqueue({ check: 'service_categories', status: 'pass', detail: `${Object.keys(serviceCategoryMap).length} service categories ready (${created} created)` })
+        } catch (e: unknown) {
+          // Non-blocking — services still upload if this fails
+          enqueue({ check: 'service_categories', status: 'fail', detail: `Optional: ${(e as Error).message}` })
+        }
+
         // ── All done ──────────────────────────────────────────────────────────
-        enqueue({ check: 'done', categoryMap, warehouseUid, tokenMap, formulaMap, productTierFieldUid })
+        enqueue({ check: 'done', categoryMap, warehouseUid, tokenMap, formulaMap, productTierFieldUid, serviceCategoryMap })
         controller.close()
       } catch (e: unknown) {
         enqueue({ check: 'done', error: (e as Error).message })

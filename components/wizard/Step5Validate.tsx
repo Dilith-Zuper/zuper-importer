@@ -5,18 +5,19 @@ import { ChecklistItem } from '@/components/ui/ChecklistItem'
 import type { ValidationResult, TokenInfo } from '@/types/wizard'
 
 const CHECK_LABELS: Record<string, string> = {
-  categories: 'Product Categories',
-  warehouse:  'Warehouse Location',
-  tokens:     'Measurement Tokens',
-  formulas:   'CPQ Formulas',
-  uoms:       'Units of Measure',
-  tier_field: 'Product Tier Custom Field',
+  categories:         'Product Categories',
+  warehouse:          'Warehouse Location',
+  tokens:             'Measurement Tokens',
+  formulas:           'CPQ Formulas',
+  uoms:               'Units of Measure',
+  tier_field:         'Product Tier Custom Field',
+  service_categories: 'Service Categories',
 }
 
-const CHECK_ORDER = ['categories', 'warehouse', 'tokens', 'formulas', 'uoms', 'tier_field'] as const
+const CHECK_ORDER = ['categories', 'warehouse', 'tokens', 'formulas', 'uoms', 'tier_field', 'service_categories'] as const
 
 export function Step5Validate() {
-  const { apiKey, baseUrl, filteredProductIds, companyName, setValidationResult, setValidationData, setStep } = useWizardStore()
+  const { apiKey, baseUrl, filteredProductIds, selectedTrades, companyName, setValidationResult, setValidationData, setStep } = useWizardStore()
   const [results, setResults] = useState<Record<string, ValidationResult>>({})
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -37,7 +38,7 @@ export function Step5Validate() {
         const response = await fetch('/api/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds }),
+          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds, selectedTrades }),
         })
 
         if (!response.ok || !response.body) {
@@ -72,6 +73,7 @@ export function Step5Validate() {
                   tokenMap: data.tokenMap as Record<string, TokenInfo>,
                   formulaMap: data.formulaMap,
                   productTierFieldUid: data.productTierFieldUid ?? '',
+                  serviceCategoryMap: data.serviceCategoryMap ?? {},
                 })
               }
               continue
@@ -89,7 +91,7 @@ export function Step5Validate() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const REQUIRED_CHECKS = CHECK_ORDER.filter(c => c !== 'tier_field')
+  const REQUIRED_CHECKS = CHECK_ORDER.filter(c => c !== 'tier_field' && c !== 'service_categories')
   const allPassed = REQUIRED_CHECKS.every(c => results[c]?.status === 'pass')
 
   return (

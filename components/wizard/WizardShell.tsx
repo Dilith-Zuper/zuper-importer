@@ -1,5 +1,7 @@
 'use client'
+import { useState } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
+import { NoToast } from '@/components/ui/NoToast'
 import { Step1Connect }      from './Step1Connect'
 import { Step2Trades }       from './Step2Trades'
 import { Step3Brands }       from './Step3Brands'
@@ -24,6 +26,18 @@ const STEPS = [
 
 export function WizardShell() {
   const { step } = useWizardStore()
+  const [toastReason, setToastReason] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function askDoubt() {
+    if (loading) return
+    setLoading(true)
+    try {
+      const d = await fetch('/api/no').then(r => r.json())
+      setToastReason(d.reason ?? '')
+    } catch { setToastReason('No answer available right now.') }
+    setLoading(false)
+  }
 
   return (
     <div className="min-h-screen bg-[#FAF9F7]">
@@ -37,9 +51,18 @@ export function WizardShell() {
             <span className="text-[#E5E2DC] select-none">·</span>
             <span className="text-sm text-gray-400">{STEPS[step - 1]?.label}</span>
           </div>
-          <span className="bg-orange-50 text-orange-600 text-xs font-semibold px-3 py-1.5 rounded-full">
-            Step {step} of {STEPS.length}
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={askDoubt}
+              disabled={loading}
+              className="text-xs font-medium text-gray-400 hover:text-orange-500 transition-colors disabled:opacity-50 underline underline-offset-2"
+            >
+              {loading ? 'Asking…' : 'Do you have any doubts? Ask here'}
+            </button>
+            <span className="bg-orange-50 text-orange-600 text-xs font-semibold px-3 py-1.5 rounded-full">
+              Step {step} of {STEPS.length}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -79,6 +102,11 @@ export function WizardShell() {
           </div>
         </div>
       </div>
+
+      {/* Toast */}
+      {toastReason !== null && (
+        <NoToast reason={toastReason} onDismiss={() => setToastReason(null)} />
+      )}
 
       {/* Content */}
       <main className="max-w-[760px] mx-auto px-6 py-12">

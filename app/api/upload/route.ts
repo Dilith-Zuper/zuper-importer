@@ -2,12 +2,14 @@ import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { fetchWithRetry, zuperHeaders, chunks, sleep } from '@/lib/zuper-fetch'
 import { buildProductPayload, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
+import { buildServicePayload } from '@/lib/service-builder'
+import { SERVICE_CATALOG } from '@/lib/service-catalog'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
-  const { baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid } = await req.json() as {
+  const { baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid, selectedTrades = ['roofing'], serviceCategoryMap = {} } = await req.json() as {
     baseUrl: string
     apiKey: string
     productIds: number[]
@@ -15,6 +17,8 @@ export async function POST(req: NextRequest) {
     warehouseUid: string
     formulaMap: Record<string, string>
     productTierFieldUid: string
+    selectedTrades?: string[]
+    serviceCategoryMap?: Record<string, string>
   }
 
   const encoder = new TextEncoder()
@@ -99,7 +103,44 @@ export async function POST(req: NextRequest) {
           if (i < batches.length - 1) await sleep(3000)
         }
 
-        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap })
+        // ── Phase 2: Upload services ──────────────────────────────────────────
+        const servicesToUpload = SERVICE_CATALOG.filter(s =>
+          s.trades.some(t => selectedTrades.includes(t)) &&
+          serviceCategoryMap[s.category_key]
+        )
+
+        let servicesUploaded = 0
+        const serviceErrors: { name: string; message: string }[] = []
+
+        if (servicesToUpload.length > 0) {
+          emit({ type: 'services_start', total: servicesToUpload.length })
+
+          for (const service of servicesToUpload) {
+            const categoryUid = serviceCategoryMap[service.category_key]
+            const payload = buildServicePayload(service, categoryUid)
+            try {
+              const r = await fetchWithRetry(`${baseUrl}product`, {
+                method: 'POST',
+                headers: zuperHeaders(apiKey),
+                body: JSON.stringify(payload),
+              })
+              if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
+                servicesUploaded++
+                emit({ type: 'service_progress', status: 'success', name: service.name, uploaded: servicesUploaded, total: servicesToUpload.length })
+              } else {
+                const msg = r.json?.message ?? JSON.stringify(r.json)
+                serviceErrors.push({ name: service.name, message: msg })
+                emit({ type: 'service_progress', status: 'error', name: service.name, message: msg, uploaded: servicesUploaded, total: servicesToUpload.length })
+              }
+            } catch (e: unknown) {
+              const msg = (e as Error).message
+              serviceErrors.push({ name: service.name, message: msg })
+              emit({ type: 'service_progress', status: 'error', name: service.name, message: msg, uploaded: servicesUploaded, total: servicesToUpload.length })
+            }
+          }
+        }
+
+        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, uploaded: 0, skipped: 0, errors: [] })
