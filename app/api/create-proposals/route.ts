@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server'
 import { fetchWithRetry, zuperHeaders } from '@/lib/zuper-fetch'
+import { SERVICE_CATALOG } from '@/lib/service-catalog'
 import type { BrandPackage, ProposalLineItem } from '@/types/wizard'
+
+const REPAIR_SERVICE_IDS = new Set(['roof-repair', 'shingle-repair', 'flashing-repair', 'gutter-repair'])
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -13,6 +16,8 @@ interface CreateInput {
   layoutTemplateUid: string
   formulaMap: Record<string, string>
   productIdMap: Record<string, string>
+  serviceIdMap: Record<string, string>
+  selectedTrades: string[]
   gutterItems: ProposalLineItem[]
   sidingItems: ProposalLineItem[]
   packages: { brand: string; templateName: string; templateDescription: string; pkg: BrandPackage }[]
@@ -20,7 +25,7 @@ interface CreateInput {
 
 export async function POST(req: NextRequest) {
   const input: CreateInput = await req.json()
-  const { baseUrl, apiKey, categoryUid, statusUid, layoutTemplateUid, formulaMap, productIdMap, gutterItems, sidingItems, packages } = input
+  const { baseUrl, apiKey, categoryUid, statusUid, layoutTemplateUid, formulaMap, productIdMap, serviceIdMap = {}, selectedTrades = ['roofing'], gutterItems, sidingItems, packages } = input
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -234,6 +239,50 @@ export async function POST(req: NextRequest) {
                     body: JSON.stringify({ line_item: { type: 'ITEM', line_item_type: 'ITEM', product_name: item.product_name, product: zuperProductUid, product_type: 'PARTS', quantity: 1, quantity_type: 'FIXED', ...(secUid ? { section_uid: secUid, section_name: label } : {}) } }),
                   })
                 }
+              }
+            }
+          }
+
+          // ── Services section (same in all 3 options) ──────────────────────
+          const servicesToAdd = SERVICE_CATALOG.filter(s =>
+            !REPAIR_SERVICE_IDS.has(s.id) &&
+            s.trades.some(t => selectedTrades.includes(t)) &&
+            serviceIdMap[s.id]
+          )
+
+          if (servicesToAdd.length > 0) {
+            for (const opt of options) {
+              const svcUrl = `${baseUrl}invoice_estimate/proposal_template/${templateUid}/options/${opt.option_uid}/line_items?items_type=LINE_ITEMS`
+
+              const hdr = await fetchWithRetry(svcUrl, {
+                method: 'POST',
+                headers: zuperHeaders(apiKey),
+                body: JSON.stringify({ line_item: { type: 'HEADER', line_item_type: 'HEADER', product_name: 'Services', section_type: 'EXPANDED', show_section_total: false, show_child_prices: true } }),
+              })
+              const hd3 = hdr.json?.data
+              const hdItem3 = Array.isArray(hd3) ? hd3[0] : hd3
+              const svcSectionUid: string = hdItem3?.section_uid ?? hdItem3?.line_item_uid ?? hdItem3?.uid ?? ''
+
+              emit({ brand, status: 'running', step: `Adding ${servicesToAdd.length} services to ${opt.option_name}…` })
+
+              for (const service of servicesToAdd) {
+                const zuperServiceUid = serviceIdMap[service.id]
+                if (!zuperServiceUid) continue
+                await fetchWithRetry(svcUrl, {
+                  method: 'POST',
+                  headers: zuperHeaders(apiKey),
+                  body: JSON.stringify({
+                    line_item: {
+                      type: 'ITEM', line_item_type: 'ITEM',
+                      product_name: service.name,
+                      product: zuperServiceUid,
+                      product_type: 'SERVICE',
+                      quantity: 1,
+                      quantity_type: 'FIXED',
+                      ...(svcSectionUid ? { section_uid: svcSectionUid, section_name: 'Services' } : {}),
+                    },
+                  }),
+                })
               }
             }
           }

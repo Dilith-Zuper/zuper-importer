@@ -22,7 +22,7 @@ interface WizardStore extends WizardState {
     productTierFieldUid: string
     serviceCategoryMap?: Record<string, string>
   }) => void
-  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[]; productIdMap: Record<string, string> }) => void
+  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[]; productIdMap: Record<string, string>; serviceIdMap: Record<string, string> }) => void
   setProposalPackages: (packages: Record<string, BrandPackage>) => void
   setGutterProposalItems: (items: ProposalLineItem[]) => void
   setSidingProposalItems: (items: ProposalLineItem[]) => void
@@ -53,6 +53,7 @@ const initialState: WizardState = {
   serviceCategoryMap: {},
   uploadSummary: { uploaded: 0, skipped: 0, errors: [] },
   productIdMap: {},
+  serviceIdMap: {},
   proposalPackages: {},
   gutterProposalItems: [],
   sidingProposalItems: [],
@@ -89,8 +90,8 @@ export const useWizardStore = create<WizardStore>((set) => ({
 
   setValidationData: (data) => set({ ...data, serviceCategoryMap: data.serviceCategoryMap ?? {} }),
 
-  setUploadSummary: ({ productIdMap, ...summary }) =>
-    set({ uploadSummary: summary, productIdMap, step: 8 }),
+  setUploadSummary: ({ productIdMap, serviceIdMap, ...summary }) =>
+    set({ uploadSummary: summary, productIdMap, serviceIdMap, step: 8 }),
 
   setProposalPackages: (packages) => set({ proposalPackages: packages }),
   setGutterProposalItems: (items) => set({ gutterProposalItems: items }),

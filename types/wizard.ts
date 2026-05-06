@@ -63,6 +63,7 @@ export interface WizardState {
   // Step 7 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
   productIdMap: Record<string, string>
+  serviceIdMap: Record<string, string>  // service.id → zuper product_uid
   // Step 9 — Proposal Templates
   proposalPackages: Record<string, BrandPackage>
   gutterProposalItems: ProposalLineItem[]

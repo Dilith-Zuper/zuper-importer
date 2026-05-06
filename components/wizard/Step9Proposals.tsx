@@ -63,7 +63,7 @@ export function Step9Proposals() {
     proposalPackages, setProposalPackages,
     gutterProposalItems, setGutterProposalItems,
     sidingProposalItems, setSidingProposalItems,
-    formulaMap, productIdMap,
+    formulaMap, productIdMap, serviceIdMap,
     setStep, reset,
     baseUrl, apiKey,
   } = useWizardStore()
@@ -183,6 +183,8 @@ export function Step9Proposals() {
         layoutTemplateUid: preflight.layoutUid,
         formulaMap,
         productIdMap,
+        serviceIdMap,
+        selectedTrades,
         gutterItems: gutterProposalItems,
         sidingItems:  sidingProposalItems,
         packages: pkgList,

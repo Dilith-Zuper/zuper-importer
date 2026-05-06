@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
 
         let servicesUploaded = 0
         const serviceErrors: { name: string; message: string }[] = []
+        const serviceIdMap: Record<string, string> = {}
 
         if (servicesToUpload.length > 0) {
           emit({ type: 'services_start', total: servicesToUpload.length })
@@ -130,6 +131,8 @@ export async function POST(req: NextRequest) {
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
                 servicesUploaded++
+                const zuperUid = r.json?.data?.product_uid ?? ''
+                if (zuperUid) serviceIdMap[service.id] = zuperUid
                 emit({ type: 'service_progress', status: 'success', name: service.name, uploaded: servicesUploaded, total: servicesToUpload.length })
               } else {
                 const msg = r.json?.message ?? JSON.stringify(r.json)
@@ -144,7 +147,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, servicesUploaded, serviceErrors })
+        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, serviceIdMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, uploaded: 0, skipped: 0, errors: [] })
