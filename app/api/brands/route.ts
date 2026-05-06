@@ -12,47 +12,86 @@ export async function POST(req: NextRequest) {
   try {
     const { trade = 'roofing' } = await req.json() as { trade?: string }
 
-    // ── Gutters / Siding ── single query, group in JS ──────────────────────────
+    const PAGE = 1000
+
+    // ── Gutters / Siding ── paginate in parallel, group in JS ─────────────────
     if (trade === 'gutters' || trade === 'siding') {
       const category = TRADE_CATEGORY[trade]
-      const { data, error } = await supabase
+      const base = supabase
         .from('srs_products')
         .select('manufacturer_norm')
         .eq('product_category', category)
         .eq('exclude_default', false)
         .not('manufacturer_norm', 'is', null)
         .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
-        .limit(5000)
+
+      // Fetch first page and total count together
+      const { data: first, error, count: total } = await (base as any).range(0, PAGE - 1).select('manufacturer_norm', { count: 'exact' })
       if (error) throw new Error(error.message)
 
-      const counts: Record<string, number> = {}
-      for (const row of data) {
-        const b = row.manufacturer_norm as string
-        counts[b] = (counts[b] ?? 0) + 1
+      const pages = [first ?? []]
+      if (total && total > PAGE) {
+        const rest = await Promise.all(
+          Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+            supabase.from('srs_products')
+              .select('manufacturer_norm')
+              .eq('product_category', category)
+              .eq('exclude_default', false)
+              .not('manufacturer_norm', 'is', null)
+              .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
+              .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
+              .then(r => r.data ?? [])
+          )
+        )
+        pages.push(...rest)
       }
+
+      const counts: Record<string, number> = {}
+      for (const page of pages)
+        for (const row of page) {
+          const b = row.manufacturer_norm as string
+          counts[b] = (counts[b] ?? 0) + 1
+        }
       const brands = Object.entries(counts)
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count)
       return NextResponse.json({ brands })
     }
 
-    // ── Roofing ── single query across all products, group in JS ───────────────
-    const { data, error } = await supabase
+    // ── Roofing ── paginate in parallel across all products, group in JS ───────
+    const { data: firstPage, error, count: total } = await supabase
       .from('srs_products')
-      .select('manufacturer_norm, is_big3_brand')
+      .select('manufacturer_norm, is_big3_brand', { count: 'exact' })
       .eq('exclude_default', false)
       .not('manufacturer_norm', 'is', null)
       .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
-      .limit(25000)
+      .range(0, PAGE - 1)
     if (error) throw new Error(error.message)
+
+    const pages = [firstPage ?? []]
+    if (total && total > PAGE) {
+      const rest = await Promise.all(
+        Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+          supabase.from('srs_products')
+            .select('manufacturer_norm, is_big3_brand')
+            .eq('exclude_default', false)
+            .not('manufacturer_norm', 'is', null)
+            .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
+            .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
+            .then(r => r.data ?? [])
+        )
+      )
+      pages.push(...rest)
+    }
 
     const counts: Record<string, number> = {}
     const big3Flag: Record<string, boolean> = {}
-    for (const row of data) {
-      const b = row.manufacturer_norm as string
-      counts[b] = (counts[b] ?? 0) + 1
-      if (row.is_big3_brand) big3Flag[b] = true
-    }
+    for (const page of pages)
+      for (const row of page) {
+        const b = row.manufacturer_norm as string
+        counts[b] = (counts[b] ?? 0) + 1
+        if (row.is_big3_brand) big3Flag[b] = true
+      }
 
     const allBrands = Object.entries(counts)
       .map(([name, count]) => ({ name, count, isBig3: big3Flag[name] ?? false }))
