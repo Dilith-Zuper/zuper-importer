@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         for (const v of allVariants) {
           if (!v.variant_code || !v.color_name) continue
           if (!variantCodeByColor.has(v.product_id)) variantCodeByColor.set(v.product_id, new Map())
-          variantCodeByColor.get(v.product_id)!.set(v.color_name, v.variant_code)
+          variantCodeByColor.get(v.product_id)!.set(v.color_name.trim(), v.variant_code)
         }
 
         let uploaded = 0
@@ -98,14 +98,26 @@ export async function POST(req: NextRequest) {
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
                 uploaded++
-                // data is an array in the Zuper response: { data: [{ product_uid, option: { option_values: [...] } }] }
                 const productData = Array.isArray(r.json?.data) ? r.json.data[0] : r.json?.data
                 const zuperUid = productData?.product_uid ?? ''
                 if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
 
-                // Capture per-color option UIDs from product creation response
-                const optionValues: Array<{ option_uid: string; option_value: string }> =
-                  productData?.option?.option_values ?? []
+                const productVariants = variantsByProduct.get(product.product_id) ?? []
+                const hasColors = productVariants.some(v => {
+                  const c = v.color_name?.trim()
+                  return c && c !== 'N/A' && c.toLowerCase() !== 'na'
+                })
+
+                let optionValues: Array<{ option_uid: string; option_value: string }> = []
+                if (zuperUid && hasColors) {
+                  // POST response doesn't reliably include option UIDs — GET the product to retrieve them
+                  const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
+                    headers: zuperHeaders(apiKey),
+                  })
+                  const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
+                  optionValues = getProductData?.option?.option_values ?? []
+                }
+
                 if (optionValues.length > 0) {
                   const colorMap = variantCodeByColor.get(product.product_id)
                   const entries = optionValues.map(ov => ({
@@ -115,16 +127,18 @@ export async function POST(req: NextRequest) {
                     purchase_price: product.purchase_price,
                   }))
                   colorCatalogMap[String(product.product_id)] = entries
-                } else if (allVariants.some(v => v.product_id === product.product_id && v.variant_code)) {
-                  // No colors but has variants — store first variant_code for vendor catalog
-                  const firstVariant = allVariants.find(v => v.product_id === product.product_id && v.variant_code)
-                  if (firstVariant) {
-                    colorCatalogMap[String(product.product_id)] = [{
+                } else if (productVariants.some(v => v.variant_code)) {
+                  // No color options — store all variant codes for vendor catalog (no option mapping)
+                  const variantEntries = productVariants
+                    .filter(v => v.variant_code)
+                    .map(v => ({
                       color_name: '',
-                      variant_code: firstVariant.variant_code ?? '',
+                      variant_code: v.variant_code ?? '',
                       option_uid: '',
                       purchase_price: product.purchase_price,
-                    }]
+                    }))
+                  if (variantEntries.length > 0) {
+                    colorCatalogMap[String(product.product_id)] = variantEntries
                   }
                 }
 

@@ -133,7 +133,9 @@ export function Step3Brands() {
     setStep(4)
   }
 
-  const filteredOthers = otherBrands.filter(b => b.name.toLowerCase().includes(roofSearch.toLowerCase()))
+  const filteredOthers = roofSearch
+    ? [...big3, ...topSecondary, ...otherBrands].filter(b => b.name.toLowerCase().includes(roofSearch.toLowerCase()))
+    : otherBrands
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">
