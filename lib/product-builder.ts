@@ -11,6 +11,7 @@ export interface SrsProduct {
   product_uom: string | string[] | null
   product_image_url: string | null
   suggested_price: number | null
+  purchase_price: number | null
   proposal_line_item: string | null
   family_tier: string | null
 }
@@ -26,6 +27,7 @@ function mapTier(tier: string | null): string {
 export interface SrsVariant {
   variant_id: number
   product_id: number
+  variant_code: string | null
   color_name: string | null
   size_name: string | null
   variant_image_url: string | null
@@ -90,7 +92,7 @@ export function buildProductPayload(
     is_available: true,
     product_category: categoryMap[product.product_category] ?? '',
     price: product.suggested_price ?? 0,
-    purchase_price: null,
+    purchase_price: product.purchase_price ?? null,
     min_quantity: 1,
     quantity: 1,
     currency: '',

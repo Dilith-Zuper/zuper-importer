@@ -67,7 +67,13 @@ export function Step7Done() {
         onClick={() => setStep(9)}
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
       >
-        Build Proposal Templates →
+        Upload Vendor Catalog →
+      </button>
+      <button
+        onClick={() => setStep(10)}
+        className="w-full h-11 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-sm"
+      >
+        Skip to Proposal Templates →
       </button>
       <button
         onClick={reset}

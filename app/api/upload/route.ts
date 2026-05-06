@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
           const chunk = allProductIds.slice(from, from + PAGE)
           const { data, error } = await supabase
             .from('srs_products')
-            .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, proposal_line_item, family_tier')
+            .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, purchase_price, proposal_line_item, family_tier')
             .in('product_id', chunk)
           if (error) throw new Error(error.message)
           allProducts.push(...(data as SrsProduct[]))
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
           const chunk = allProductIds.slice(from, from + 500)
           const { data, error } = await supabase
             .from('srs_variants')
-            .select('variant_id, product_id, color_name, size_name, variant_image_url, is_restricted')
+            .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
             .in('product_id', chunk)
             .eq('is_restricted', false)
           if (error) throw new Error(error.message)
@@ -65,9 +65,19 @@ export async function POST(req: NextRequest) {
           variantsByProduct.set(v.product_id, arr)
         }
 
+        // Build color→variant_code lookup: { product_id → { color_name → variant_code } }
+        const variantCodeByColor = new Map<number, Map<string, string>>()
+        for (const v of allVariants) {
+          if (!v.variant_code || !v.color_name) continue
+          if (!variantCodeByColor.has(v.product_id)) variantCodeByColor.set(v.product_id, new Map())
+          variantCodeByColor.get(v.product_id)!.set(v.color_name, v.variant_code)
+        }
+
         let uploaded = 0
         const errors: { productId: number; productName: string; message: string }[] = []
         const productIdMap: Record<string, string> = {}
+        // colorCatalogMap: srs_product_id → [{color_name, variant_code, option_uid, purchase_price}]
+        const colorCatalogMap: Record<string, Array<{ color_name: string; variant_code: string; option_uid: string; purchase_price: number | null }>> = {}
         const batches = chunks(allProducts, 100)
 
         for (const [i, batch] of Array.from(batches.entries())) {
@@ -90,6 +100,32 @@ export async function POST(req: NextRequest) {
                 uploaded++
                 const zuperUid = r.json?.data?.product_uid ?? ''
                 if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
+
+                // Capture per-color option UIDs from product creation response
+                const optionValues: Array<{ option_uid: string; option_value: string }> =
+                  r.json?.data?.option?.option_values ?? r.json?.data?.options ?? []
+                if (optionValues.length > 0) {
+                  const colorMap = variantCodeByColor.get(product.product_id)
+                  const entries = optionValues.map(ov => ({
+                    color_name: ov.option_value,
+                    variant_code: colorMap?.get(ov.option_value) ?? '',
+                    option_uid: ov.option_uid,
+                    purchase_price: product.purchase_price,
+                  }))
+                  colorCatalogMap[String(product.product_id)] = entries
+                } else if (allVariants.some(v => v.product_id === product.product_id && v.variant_code)) {
+                  // No colors but has variants — store first variant_code for vendor catalog
+                  const firstVariant = allVariants.find(v => v.product_id === product.product_id && v.variant_code)
+                  if (firstVariant) {
+                    colorCatalogMap[String(product.product_id)] = [{
+                      color_name: '',
+                      variant_code: firstVariant.variant_code ?? '',
+                      option_uid: '',
+                      purchase_price: product.purchase_price,
+                    }]
+                  }
+                }
+
                 emit({ type: 'progress', status: 'success', productName: product.product_name, uploaded, total: allProducts.length })
               } else {
                 const msg = r.json?.message ?? JSON.stringify(r.json)
@@ -147,7 +183,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, serviceIdMap, servicesUploaded, serviceErrors })
+        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, uploaded: 0, skipped: 0, errors: [] })

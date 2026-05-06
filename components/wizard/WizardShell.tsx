@@ -11,7 +11,8 @@ import { Step4Preview }      from './Step4Preview'
 import { Step5Validate }     from './Step5Validate'
 import { Step6Upload }       from './Step6Upload'
 import { Step7Done }         from './Step7Done'
-import { Step9Proposals }    from './Step9Proposals'
+import { Step9Vendor }       from './Step9Vendor'
+import { Step10Proposals }   from './Step10Proposals'
 
 const STEPS = [
   { label: 'Connect',   short: 'Connect'  },
@@ -22,6 +23,7 @@ const STEPS = [
   { label: 'Validate',  short: 'Validate' },
   { label: 'Upload',    short: 'Upload'   },
   { label: 'Done',      short: 'Done'     },
+  { label: 'Vendor',    short: 'Vendor'   },
   { label: 'Templates', short: 'Templates'},
 ]
 
@@ -122,8 +124,9 @@ export function WizardShell() {
         {step === 5 && <Step4Preview />}
         {step === 6 && <Step5Validate />}
         {step === 7 && <Step6Upload />}
-        {step === 8 && <Step7Done />}
-        {step === 9 && <Step9Proposals />}
+        {step === 8  && <Step7Done />}
+        {step === 9  && <Step9Vendor />}
+        {step === 10 && <Step10Proposals />}
       </main>
     </div>
   )

@@ -32,8 +32,15 @@ export interface ValidationResult {
   detail: string
 }
 
+export interface ColorCatalogEntry {
+  color_name: string
+  variant_code: string
+  option_uid: string
+  purchase_price: number | null
+}
+
 export interface WizardState {
-  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
   // Step 1 — Connect
   companyLoginName: string
   apiKey: string
@@ -63,7 +70,8 @@ export interface WizardState {
   // Step 7 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
   productIdMap: Record<string, string>
-  serviceIdMap: Record<string, string>  // service.id → zuper product_uid
+  serviceIdMap: Record<string, string>          // service.id → zuper product_uid
+  colorCatalogMap: Record<string, ColorCatalogEntry[]>  // srs_product_id → per-color vendor entries
   // Step 9 — Proposal Templates
   proposalPackages: Record<string, BrandPackage>
   gutterProposalItems: ProposalLineItem[]

@@ -81,7 +81,7 @@ export function Step6Upload() {
               setServicesDone(true)
               const errs = data.errors ?? []
               setErrors(errs)
-              setUploadSummary({ uploaded: data.uploaded ?? 0, skipped: data.skipped ?? 0, errors: errs, productIdMap: data.productIdMap ?? {}, serviceIdMap: data.serviceIdMap ?? {} })
+              setUploadSummary({ uploaded: data.uploaded ?? 0, skipped: data.skipped ?? 0, errors: errs, productIdMap: data.productIdMap ?? {}, serviceIdMap: data.serviceIdMap ?? {}, colorCatalogMap: data.colorCatalogMap ?? {} })
             }
           }
         }

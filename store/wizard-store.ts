@@ -1,6 +1,6 @@
 'use client'
 import { create } from 'zustand'
-import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem } from '@/types/wizard'
+import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry } from '@/types/wizard'
 
 interface WizardStore extends WizardState {
   setStep: (step: WizardState['step']) => void
@@ -22,7 +22,7 @@ interface WizardStore extends WizardState {
     productTierFieldUid: string
     serviceCategoryMap?: Record<string, string>
   }) => void
-  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[]; productIdMap: Record<string, string>; serviceIdMap: Record<string, string> }) => void
+  setUploadSummary: (summary: { uploaded: number; skipped: number; errors: UploadError[]; productIdMap: Record<string, string>; serviceIdMap: Record<string, string>; colorCatalogMap: Record<string, ColorCatalogEntry[]> }) => void
   setProposalPackages: (packages: Record<string, BrandPackage>) => void
   setGutterProposalItems: (items: ProposalLineItem[]) => void
   setSidingProposalItems: (items: ProposalLineItem[]) => void
@@ -54,6 +54,7 @@ const initialState: WizardState = {
   uploadSummary: { uploaded: 0, skipped: 0, errors: [] },
   productIdMap: {},
   serviceIdMap: {},
+  colorCatalogMap: {},
   proposalPackages: {},
   gutterProposalItems: [],
   sidingProposalItems: [],
@@ -90,8 +91,8 @@ export const useWizardStore = create<WizardStore>((set) => ({
 
   setValidationData: (data) => set({ ...data, serviceCategoryMap: data.serviceCategoryMap ?? {} }),
 
-  setUploadSummary: ({ productIdMap, serviceIdMap, ...summary }) =>
-    set({ uploadSummary: summary, productIdMap, serviceIdMap, step: 8 }),
+  setUploadSummary: ({ productIdMap, serviceIdMap, colorCatalogMap, ...summary }) =>
+    set({ uploadSummary: summary, productIdMap, serviceIdMap, colorCatalogMap, step: 8 }),
 
   setProposalPackages: (packages) => set({ proposalPackages: packages }),
   setGutterProposalItems: (items) => set({ gutterProposalItems: items }),
