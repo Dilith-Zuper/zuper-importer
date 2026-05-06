@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { ITEM_TO_FORMULA_KEY } from '@/lib/formula-definitions'
 import { normalizeCategory } from '@/lib/category-norm'
+import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 import type { ProposalLineItem, BrandPackage } from '@/types/wizard'
 
 const CPQ_CATEGORIES = ['SHINGLES', 'HIP AND RIDGE', 'STARTER', 'UNDERLAYMENT', 'ICE AND WATER', 'VENTS']
 const CPQ_COMPONENTS = ['Shingles', 'Hip & Ridge Cap', 'Starter Strip', 'Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']
 
-// Universal accessories — same across Good / Better / Best, drawn from manufacturer-varies products
-const UNIVERSAL_CATEGORIES = ['DRIP EDGE', 'COIL NAILS', 'OTHER FASTENERS', 'OTHER FLASHING METAL', 'PIPE FLASHING', 'CAULK']
-const UNIVERSAL_COMPONENTS  = [
+// Universal accessories — same across Good / Better / Best, sourced from ACCESSORY_PRODUCT_IDS
+const UNIVERSAL_COMPONENTS = [
   'Drip Edge', 'Step Flashing', 'W-Valley', 'Counter / Headwall Flashing',
   'Pipe Boot 3"', 'Coil Nails', 'Plastic Cap Nails', 'Fasteners', 'Caulk / Sealant',
+  'Ridge Vent',  // Lomanco vents from accessory catalog — fallback when brand has no ridge vent
 ]
 
 // Curated gutter proposal line items (all have CPQ formulas)
@@ -47,6 +48,21 @@ export async function POST(req: NextRequest) {
 
     const result: Record<string, BrandPackage | ProposalLineItem[]> = {}
 
+    // ── Universal accessories (fetched once, same for every brand) ───────────
+    const { data: universalProducts } = await supabase
+      .from('srs_products')
+      .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item')
+      .in('product_id', ACCESSORY_PRODUCT_IDS)
+      .limit(30)
+
+    const universalMap: Record<string, ProposalLineItem> = {}
+    for (const p of universalProducts ?? []) {
+      const comp = normalizeCategory(p.proposal_line_item, p.product_category)
+      if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
+      if (!universalMap[comp] || p.primary_item)
+        universalMap[comp] = { product_id: p.product_id, product_name: p.product_name, proposal_line_item: comp, formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null, suggested_price: p.suggested_price, family_tier: null }
+    }
+
     // ── Roofing G/B/B packages ────────────────────────────────────────────────
     if (selectedTrades.includes('roofing')) {
       for (const brand of selectedBrands) {
@@ -81,22 +97,6 @@ export async function POST(req: NextRequest) {
           if (p.primary_item) { const arr = byCompTier[comp][tier]; arr.unshift(arr.pop()!) }
         }
 
-        const { data: universals } = await supabase
-          .from('srs_products')
-          .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item')
-          .eq('exclude_default', false).eq('is_universal', true)
-          .ilike('manufacturer_norm', '%manufacturer varies%')
-          .in('product_category', UNIVERSAL_CATEGORIES)
-          .limit(100)
-
-        const universalMap: Record<string, ProposalLineItem> = {}
-        for (const p of universals ?? []) {
-          const comp = normalizeCategory(p.proposal_line_item, p.product_category)
-          if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
-          if (!universalMap[comp] || p.primary_item)
-            universalMap[comp] = { product_id: p.product_id, product_name: p.product_name, proposal_line_item: comp, formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null, suggested_price: p.suggested_price, family_tier: null }
-        }
-
         const buildPackage = (shingleTiers: string[], accessoryTiers: string[]): ProposalLineItem[] => {
           const lines: ProposalLineItem[] = []
           const shingles = pickProduct(byCompTier['Shingles'] ?? {}, shingleTiers)
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
             if (item) { lines.push(item); break }
           }
           for (const comp of ['Box Vent', 'Ridge Vent']) {
-            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
+            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better']) ?? universalMap[comp] ?? null
             if (item) { lines.push(item); break }
           }
           for (const comp of UNIVERSAL_COMPONENTS) {
