@@ -98,12 +98,14 @@ export async function POST(req: NextRequest) {
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
                 uploaded++
-                const zuperUid = r.json?.data?.product_uid ?? ''
+                // data is an array in the Zuper response: { data: [{ product_uid, option: { option_values: [...] } }] }
+                const productData = Array.isArray(r.json?.data) ? r.json.data[0] : r.json?.data
+                const zuperUid = productData?.product_uid ?? ''
                 if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
 
                 // Capture per-color option UIDs from product creation response
                 const optionValues: Array<{ option_uid: string; option_value: string }> =
-                  r.json?.data?.option?.option_values ?? r.json?.data?.options ?? []
+                  productData?.option?.option_values ?? []
                 if (optionValues.length > 0) {
                   const colorMap = variantCodeByColor.get(product.product_id)
                   const entries = optionValues.map(ov => ({
