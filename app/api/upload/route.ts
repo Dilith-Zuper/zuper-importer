@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
         if (servicesToUpload.length > 0) {
           emit({ type: 'services_start', total: servicesToUpload.length })
 
-          for (const service of servicesToUpload) {
+          await Promise.allSettled(servicesToUpload.map(async (service) => {
             const categoryUid = serviceCategoryMap[service.category_key]
             const payload = buildServicePayload(service, categoryUid)
             try {
@@ -169,7 +169,8 @@ export async function POST(req: NextRequest) {
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
                 servicesUploaded++
-                const zuperUid = r.json?.data?.product_uid ?? ''
+                const serviceData = Array.isArray(r.json?.data) ? r.json.data[0] : r.json?.data
+                const zuperUid = serviceData?.product_uid ?? ''
                 if (zuperUid) serviceIdMap[service.id] = zuperUid
                 emit({ type: 'service_progress', status: 'success', name: service.name, uploaded: servicesUploaded, total: servicesToUpload.length })
               } else {
@@ -182,7 +183,7 @@ export async function POST(req: NextRequest) {
               serviceErrors.push({ name: service.name, message: msg })
               emit({ type: 'service_progress', status: 'error', name: service.name, message: msg, uploaded: servicesUploaded, total: servicesToUpload.length })
             }
-          }
+          }))
         }
 
         emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
