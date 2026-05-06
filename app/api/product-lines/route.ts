@@ -17,21 +17,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({})
     }
 
-    // Single batch query for all brands — then group in JS
-    let query = supabase
-      .from('srs_products')
-      .select('manufacturer_norm, product_line')
-      .in('manufacturer_norm', selectedBrands)
-      .eq('exclude_default', false)
-      .not('product_line', 'is', null)
-      .limit(50000)
+    const PAGE = 1000
+    const baseFilters = (q: ReturnType<typeof supabase.from>) =>
+      (q as any)
+        .select('manufacturer_norm, product_line', { count: 'exact' })
+        .in('manufacturer_norm', selectedBrands)
+        .eq('exclude_default', false)
+        .not('product_line', 'is', null)
 
-    if (trade !== 'roofing' && TRADE_CATEGORY[trade]) {
-      query = query.eq('product_category', TRADE_CATEGORY[trade])
+    const categoryFilter = trade !== 'roofing' && TRADE_CATEGORY[trade]
+      ? (q: any) => q.eq('product_category', TRADE_CATEGORY[trade])
+      : (q: any) => q
+
+    const applyFilters = (q: any) => categoryFilter(baseFilters(q))
+
+    // Paginate in parallel — Supabase caps each request at 1000 rows
+    const { data: firstPage, error, count: total } = await applyFilters(
+      supabase.from('srs_products')
+    ).range(0, PAGE - 1)
+    if (error) throw new Error(error.message)
+
+    const pages: Array<{ manufacturer_norm: string; product_line: string }[]> = [firstPage ?? []]
+    if (total && total > PAGE) {
+      const rest = await Promise.all(
+        Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+          applyFilters(supabase.from('srs_products'))
+            .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
+            .then((r: any) => r.data ?? [])
+        )
+      )
+      pages.push(...rest)
     }
 
-    const { data, error } = await query
-    if (error) throw new Error(error.message)
+    const data = pages.flat()
 
     // Group by brand → product line with counts
     const grouped: Record<string, Record<string, number>> = {}
