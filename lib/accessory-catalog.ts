@@ -33,7 +33,8 @@ export const ACCESSORY_PRODUCT_IDS: number[] = [
   92052,   // W-Valley (Copper)
 
   // Pipe Boots
-  93517,   // DMI — Master Flash EMC Retrofit Pipe Boot
+  // 93517 removed — DMI is in OTHER FLASHING METAL with proposal_line_item='Step Flashing'
+  // in the DB (miscategorized), so it would land in the wrong proposal slot
   164240,  // Dektite — EPDM Pipe Boot
   164159,  // Dektite — High Temp Pipe Boot
 
