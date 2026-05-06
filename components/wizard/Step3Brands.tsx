@@ -9,12 +9,29 @@ interface BrandItem { name: string; count: number; isBig3?: boolean }
 
 const TRADE_LABELS: Record<Trade, string> = { roofing: 'Roofing', gutters: 'Gutters', siding: 'Siding' }
 
+function brandMatches(query: string, name: string): boolean {
+  const q = query.toLowerCase()
+  const n = name.toLowerCase()
+  if (n.includes(q)) return true
+  // Fuzzy: tolerate up to ceil(queryLen/4) edits against the brand name prefix
+  const threshold = Math.ceil(q.length / 4)
+  const prefix = n.substring(0, q.length + threshold)
+  const m = q.length, k = prefix.length
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: k + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0)
+  )
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= k; j++)
+      dp[i][j] = q[i - 1] === prefix[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+  return dp[m][k] <= threshold
+}
+
 // ── Simple brand list for gutters / siding ──────────────────────────────────
 function SimpleBrandList({
   brands, selected, onToggle,
 }: { brands: BrandItem[]; selected: Set<string>; onToggle: (name: string) => void }) {
   const [search, setSearch] = useState('')
-  const filtered = brands.filter(b => b.name.toLowerCase().includes(search.toLowerCase()))
+  const filtered = brands.filter(b => brandMatches(search, b.name))
 
   return (
     <div className="space-y-3">
@@ -134,7 +151,7 @@ export function Step3Brands() {
   }
 
   const filteredOthers = roofSearch
-    ? [...big3, ...topSecondary, ...otherBrands].filter(b => b.name.toLowerCase().includes(roofSearch.toLowerCase()))
+    ? [...big3, ...topSecondary, ...otherBrands].filter(b => brandMatches(roofSearch, b.name))
     : otherBrands
 
   if (loading) return (
