@@ -49,10 +49,15 @@ export function buildProductPayload(
 
   const cappedColors = colors.slice(0, 50)
 
+  // Shingles have genuine color choices the customer must pick.
+  // Everything else (nails/fasteners → "Mill", accessories → size codes) is
+  // a variant label, not a customer-facing selection.
+  const isShingles = product.product_category === 'SHINGLES'
+
   const option = cappedColors.length > 0 ? {
-    customer_selection: true,
-    mandate_customer_selection: false,
-    option_label: 'Color',
+    customer_selection: isShingles,
+    mandate_customer_selection: isShingles,
+    option_label: isShingles ? 'Color' : 'Variant',
     option_values: cappedColors.map(c => ({
       option_value: c,
       option_image: '',
