@@ -22,4 +22,12 @@ export const REQUIRED_TOKENS: RequiredToken[] = [
   { name: 'No of Outer Elbows',           uom: 'EA'   },
   { name: 'Downspout Elbows',             uom: 'EA'   },
   { name: 'Total Siding Area',            uom: 'SQFT' },
+
+  // Slope-band area tokens — present in 53/54 customer accounts (see
+  // Token_Analysis.xlsx). Wired into the slope-based tear-off and install
+  // service formulas so quantities auto-route by pitch.
+  { name: 'Low Slope',                    uom: 'SQFT' },
+  { name: 'Standard Slope',               uom: 'SQFT' },
+  { name: 'Steep Slope',                  uom: 'SQFT' },
+  { name: 'Very Steep Slope',             uom: 'SQFT' },
 ]

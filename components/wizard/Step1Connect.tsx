@@ -76,6 +76,20 @@ export function Step1Connect() {
             </>
           ) : 'Connect →'}
         </button>
+
+        <a
+          href="https://srs-sku-fetcher.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block bg-white rounded-2xl border border-[#E5E2DC] px-5 py-4 hover:border-orange-300 transition-colors group"
+        >
+          <p className="text-sm text-gray-500 leading-relaxed">
+            Already have parts in your account? Need to fetch an SRS SKU or product ID?{' '}
+            <span className="text-orange-500 font-semibold group-hover:text-orange-600 transition-colors">
+              Open the SKU fetcher →
+            </span>
+          </p>
+        </a>
       </div>
     </div>
   )

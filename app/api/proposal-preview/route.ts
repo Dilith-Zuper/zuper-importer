@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { ITEM_TO_FORMULA_KEY } from '@/lib/formula-definitions'
 import { normalizeCategory } from '@/lib/category-norm'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
+import { rulesForBrand, type ProposalTier, type TierUpgradeRule } from '@/lib/tier-upgrade-rules'
 import type { ProposalLineItem, BrandPackage } from '@/types/wizard'
 
 const CPQ_CATEGORIES = ['SHINGLES', 'HIP AND RIDGE', 'STARTER', 'UNDERLAYMENT', 'ICE AND WATER', 'VENTS']
@@ -27,6 +28,42 @@ function pickProduct(byTier: Record<string, ProposalLineItem[]>, tierPrefs: stri
     if (items?.length) return items[0]
   }
   return null
+}
+
+/**
+ * Resolve tier-upgrade rules for one brand to actual products from Supabase.
+ * Returns: tier → { replaced_component → upgraded ProposalLineItem }.
+ * Failures (no matching product) silently drop the rule — the package falls
+ * back to the standard universal accessory.
+ */
+async function resolveTierOverrides(rules: TierUpgradeRule[]): Promise<Map<ProposalTier, Record<string, ProposalLineItem>>> {
+  const out = new Map<ProposalTier, Record<string, ProposalLineItem>>()
+  for (const rule of rules) {
+    let q = supabase
+      .from('srs_products')
+      .select('product_id, product_name, proposal_line_item, suggested_price, primary_item')
+      .eq('exclude_default', false)
+    if (rule.with.manufacturer_norm) q = q.eq('manufacturer_norm', rule.with.manufacturer_norm)
+    if (rule.with.new_component) q = q.eq('proposal_line_item', rule.with.new_component)
+    if (rule.with.product_name_ilike) q = q.ilike('product_name', rule.with.product_name_ilike)
+
+    const { data } = await q.order('primary_item', { ascending: false }).limit(1)
+    const p = data?.[0]
+    if (!p) continue
+
+    const comp = rule.with.new_component ?? rule.replace_component
+    const item: ProposalLineItem = {
+      product_id: p.product_id,
+      product_name: p.product_name,
+      proposal_line_item: comp,
+      formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
+      suggested_price: p.suggested_price,
+      family_tier: null,
+    }
+    if (!out.has(rule.tier)) out.set(rule.tier, {})
+    out.get(rule.tier)![rule.replace_component] = item
+  }
+  return out
 }
 
 export async function POST(req: NextRequest) {
@@ -68,6 +105,10 @@ export async function POST(req: NextRequest) {
       for (const brand of selectedBrands) {
         const allowedLines = selectedProductLines[brand] ?? []
 
+        // Resolve brand-specific accessory upgrades for Better / Best tiers.
+        // Most brands have no rules → empty map → no-op.
+        const tierOverrides = await resolveTierOverrides(rulesForBrand(brand))
+
         const query = supabase
           .from('srs_products')
           .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, product_line')
@@ -97,36 +138,48 @@ export async function POST(req: NextRequest) {
           if (p.primary_item) { const arr = byCompTier[comp][tier]; arr.unshift(arr.pop()!) }
         }
 
-        const buildPackage = (shingleTiers: string[], accessoryTiers: string[]): ProposalLineItem[] => {
+        const buildPackage = (tierName: ProposalTier, shingleTiers: string[], accessoryTiers: string[]): ProposalLineItem[] => {
+          const overrides = tierOverrides.get(tierName) ?? {}
           const lines: ProposalLineItem[] = []
           const shingles = pickProduct(byCompTier['Shingles'] ?? {}, shingleTiers)
           if (shingles) lines.push(shingles)
           const hip = pickProduct(byCompTier['Hip & Ridge Cap'] ?? {}, accessoryTiers)
           if (hip) lines.push(hip)
-          const starter = pickProduct(byCompTier['Starter Strip'] ?? {}, accessoryTiers)
+          // Starter — brand-specific upgrade may swap this slot for Better/Best.
+          const starter = overrides['Starter Strip']
+            ?? pickProduct(byCompTier['Starter Strip'] ?? {}, accessoryTiers)
           if (starter) lines.push(starter)
           for (const comp of ['Underlayment — Synthetic', 'Underlayment — Felt 30#']) {
             const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
             if (item) { lines.push(item); break }
           }
-          for (const comp of ['Ice & Water — Standard', 'Ice & Water — High Temp']) {
-            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
-            if (item) { lines.push(item); break }
+          // Ice & Water — brand-specific upgrade may swap Standard for High Temp.
+          const iceWaterOverride = overrides['Ice & Water — Standard']
+          if (iceWaterOverride) {
+            lines.push(iceWaterOverride)
+          } else {
+            for (const comp of ['Ice & Water — Standard', 'Ice & Water — High Temp']) {
+              const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
+              if (item) { lines.push(item); break }
+            }
           }
           for (const comp of ['Box Vent', 'Ridge Vent']) {
             const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better']) ?? universalMap[comp] ?? null
             if (item) { lines.push(item); break }
           }
           for (const comp of UNIVERSAL_COMPONENTS) {
-            if (universalMap[comp]) lines.push(universalMap[comp])
+            // Skip components already pushed above (starter/ice-water handled separately).
+            if (comp === 'Starter Strip' || comp === 'Ice & Water — Standard') continue
+            const item = overrides[comp] ?? universalMap[comp]
+            if (item) lines.push(item)
           }
           return lines
         }
 
         result[brand] = {
-          good:   buildPackage(['addon', 'good'],          ['addon', 'good', 'better', 'best']),
-          better: buildPackage(['good',  'addon'],          ['good',  'addon', 'better', 'best']),
-          best:   buildPackage(['best',  'better', 'good'], ['best',  'good',  'addon',  'better']),
+          good:   buildPackage('good',   ['addon', 'good'],          ['addon', 'good', 'better', 'best']),
+          better: buildPackage('better', ['good',  'addon'],          ['good',  'addon', 'better', 'best']),
+          best:   buildPackage('best',   ['best',  'better', 'good'], ['best',  'good',  'addon',  'better']),
         }
       }
     }

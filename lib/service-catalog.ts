@@ -10,6 +10,12 @@ export interface ServiceDef {
   service_type: ServiceType
   trades: Trade[]
   category_key: string
+  /**
+   * Optional formula key (from FORMULA_DEFINITIONS) — when set, the proposal
+   * line item uses quantity_type=FORMULA so quantities auto-calculate from
+   * measurement tokens. Currently wired for slope-based tear-off and install.
+   */
+  formula_key?: string
 }
 
 export const SERVICE_CATALOG: ServiceDef[] = [
@@ -168,6 +174,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'tear_off_low_slope_sq',
   },
   {
     id: 'tear-off-standard-slope',
@@ -177,6 +184,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'tear_off_standard_slope_sq',
   },
   {
     id: 'tear-off-steep-slope',
@@ -186,6 +194,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'tear_off_steep_slope_sq',
   },
   {
     id: 'tear-off-very-steep',
@@ -195,6 +204,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'tear_off_very_steep_sq',
   },
 
   // ── Roofing — slope-based shingle installation ──────────────────────────────
@@ -206,6 +216,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'shingle_install_low_slope_sq',
   },
   {
     id: 'shingle-install-standard-slope',
@@ -215,6 +226,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'shingle_install_standard_slope_sq',
   },
   {
     id: 'shingle-install-steep-slope',
@@ -224,6 +236,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'shingle_install_steep_slope_sq',
   },
   {
     id: 'shingle-install-very-steep',
@@ -233,6 +246,7 @@ export const SERVICE_CATALOG: ServiceDef[] = [
     service_type: 'FIXED',
     trades: ['roofing'],
     category_key: 'roofing-services',
+    formula_key: 'shingle_install_very_steep_sq',
   },
 
   // ── Gutters ─────────────────────────────────────────────────────────────────

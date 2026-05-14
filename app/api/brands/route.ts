@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { mapWithLimit } from '@/lib/limit'
+
+const PAGE_FANOUT_LIMIT = 5
 
 const TOP_SECONDARY = ['Iko', 'Malarkey', 'Tamko', 'Atlas', 'Boral', 'Decra']
 
@@ -31,8 +34,11 @@ export async function POST(req: NextRequest) {
 
       const pages = [first ?? []]
       if (total && total > PAGE) {
-        const rest = await Promise.all(
-          Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+        const pageCount = Math.ceil((total - PAGE) / PAGE)
+        const rest = await mapWithLimit(
+          Array.from({ length: pageCount }, (_, i) => i),
+          PAGE_FANOUT_LIMIT,
+          (i) =>
             supabase.from('srs_products')
               .select('manufacturer_norm')
               .eq('product_category', category)
@@ -41,7 +47,6 @@ export async function POST(req: NextRequest) {
               .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
               .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
               .then(r => r.data ?? [])
-          )
         )
         pages.push(...rest)
       }
@@ -70,8 +75,11 @@ export async function POST(req: NextRequest) {
 
     const pages = [firstPage ?? []]
     if (total && total > PAGE) {
-      const rest = await Promise.all(
-        Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+      const pageCount = Math.ceil((total - PAGE) / PAGE)
+      const rest = await mapWithLimit(
+        Array.from({ length: pageCount }, (_, i) => i),
+        PAGE_FANOUT_LIMIT,
+        (i) =>
           supabase.from('srs_products')
             .select('manufacturer_norm, is_big3_brand')
             .eq('exclude_default', false)
@@ -79,7 +87,6 @@ export async function POST(req: NextRequest) {
             .not('manufacturer_norm', 'ilike', '%manufacturer varies%')
             .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
             .then(r => r.data ?? [])
-        )
       )
       pages.push(...rest)
     }

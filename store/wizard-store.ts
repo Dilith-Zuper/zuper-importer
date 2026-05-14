@@ -1,5 +1,6 @@
 'use client'
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry } from '@/types/wizard'
 
 interface WizardStore extends WizardState {
@@ -60,7 +61,7 @@ const initialState: WizardState = {
   sidingProposalItems: [],
 }
 
-export const useWizardStore = create<WizardStore>((set) => ({
+export const useWizardStore = create<WizardStore>()(persist((set) => ({
   ...initialState,
 
   setStep: (step) => set({ step }),
@@ -99,4 +100,22 @@ export const useWizardStore = create<WizardStore>((set) => ({
   setSidingProposalItems: (items) => set({ sidingProposalItems: items }),
 
   reset: () => set(initialState),
+}), {
+  name: 'zuper-importer-wizard',
+  storage: createJSONStorage(() => localStorage),
+  // Persist everything EXCEPT the API key — security: keep it memory-only so a
+  // refreshed tab requires re-entering it. companyLoginName is fine to persist.
+  // Reset step to 1 on rehydrate so the user lands on Connect to re-enter the key.
+  partialize: (state) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { apiKey, ...rest } = state
+    return rest
+  },
+  onRehydrateStorage: () => (state) => {
+    if (state) {
+      state.apiKey = ''
+      // If they had any progress, drop them at Connect to re-auth, then they can navigate forward.
+      if (state.step > 1) state.step = 1
+    }
+  },
 }))

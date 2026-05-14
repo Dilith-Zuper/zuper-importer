@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { fetchWithRetry, zuperHeaders } from '@/lib/zuper-fetch'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
+import { getCached } from '@/lib/zuper-cache'
 import type { BrandPackage, ProposalLineItem } from '@/types/wizard'
 
 const REPAIR_SERVICE_IDS = new Set(['roof-repair', 'shingle-repair', 'flashing-repair', 'gutter-repair'])
@@ -30,30 +31,46 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (data: object) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      let streamClosed = false
+      const emit = (data: object) => {
+        if (streamClosed) return
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+        } catch {
+          streamClosed = true
+        }
+      }
+      req.signal.addEventListener('abort', () => { streamClosed = true })
 
       // ── Fetch live formula map (formula_key → formula_uid) from Zuper ────────
-      // Always refresh from the account rather than relying on the cached store value.
+      // Cached per-apiKey for 5 minutes so repeated wizard runs (or proposal
+      // re-creates) don't re-walk every formula page. Invalidated by validate
+      // route after any formula POST.
       const liveFormulaMap: Record<string, string> = { ...formulaMap }
       try {
-        let page = 1
-        while (true) {
-          const r = await fetchWithRetry(
-            `${baseUrl}invoice_estimate/cpq/formulas?count=100&page=${page}`,
-            { headers: zuperHeaders(apiKey) }
-          )
-          const rows: { formula_key: string; formula_uid: string }[] = r.json?.data ?? []
-          for (const f of rows) {
-            if (f.formula_key && f.formula_uid) liveFormulaMap[f.formula_key] = f.formula_uid
+        const cached = await getCached(apiKey, 'formulas', async () => {
+          const accumulated: Record<string, string> = {}
+          let page = 1
+          while (true) {
+            const r = await fetchWithRetry(
+              `${baseUrl}invoice_estimate/cpq/formulas?count=100&page=${page}`,
+              { headers: zuperHeaders(apiKey) }
+            )
+            const rows: { formula_key: string; formula_uid: string }[] = r.json?.data ?? []
+            for (const f of rows) {
+              if (f.formula_key && f.formula_uid) accumulated[f.formula_key] = f.formula_uid
+            }
+            if (rows.length < 100) break
+            page++
           }
-          if (rows.length < 100) break
-          page++
-        }
+          return accumulated
+        })
+        Object.assign(liveFormulaMap, cached)
       } catch { /* fall back to passed formulaMap */ }
 
       // ── Per-brand template creation ──────────────────────────────────────────
       for (const { brand, templateName, templateDescription, pkg } of packages) {
+        if (streamClosed) break
         try {
           emit({ brand, status: 'running', step: 'Creating template…' })
 
@@ -268,6 +285,13 @@ export async function POST(req: NextRequest) {
               for (const service of servicesToAdd) {
                 const zuperServiceUid = serviceIdMap[service.id]
                 if (!zuperServiceUid) continue
+                // Slope-based services have a formula_key — use FORMULA quantity so
+                // qty auto-routes from measurement tokens (Low/Standard/Steep/Very Steep Slope).
+                // Falls back to FIXED if the formula didn't get created (e.g. slope tokens missing).
+                const formulaUid = service.formula_key ? liveFormulaMap[service.formula_key] : undefined
+                const quantityFields = formulaUid
+                  ? { quantity_type: 'FORMULA', formula: formulaUid }
+                  : { quantity_type: 'FIXED' }
                 await fetchWithRetry(svcUrl, {
                   method: 'POST',
                   headers: zuperHeaders(apiKey),
@@ -278,7 +302,7 @@ export async function POST(req: NextRequest) {
                       product: zuperServiceUid,
                       product_type: 'SERVICE',
                       quantity: 1,
-                      quantity_type: 'FIXED',
+                      ...quantityFields,
                       ...(svcSectionUid ? { section_uid: svcSectionUid, section_name: 'Services' } : {}),
                     },
                   }),

@@ -34,13 +34,34 @@ export interface SrsVariant {
   is_restricted: boolean
 }
 
+export interface PriceFallback {
+  /** Median suggested_price for (product_category | family_tier) — keyed "CATEGORY|tier" */
+  byCategoryTier: Record<string, number>
+  /** Median suggested_price for product_category alone — fallback when (cat,tier) has no priced products */
+  byCategory: Record<string, number>
+}
+
+function resolvePrice(product: SrsProduct, fallback?: PriceFallback): { price: number; estimated: boolean } {
+  if (product.suggested_price != null && product.suggested_price > 0) {
+    return { price: product.suggested_price, estimated: false }
+  }
+  if (!fallback) return { price: 0, estimated: false }
+  const tierKey = `${product.product_category}|${product.family_tier ?? 'unknown'}`
+  const fromTier = fallback.byCategoryTier[tierKey]
+  if (fromTier != null && fromTier > 0) return { price: fromTier, estimated: true }
+  const fromCat = fallback.byCategory[product.product_category]
+  if (fromCat != null && fromCat > 0) return { price: fromCat, estimated: true }
+  return { price: 0, estimated: false }
+}
+
 export function buildProductPayload(
   product: SrsProduct,
   variants: SrsVariant[],
   categoryMap: Record<string, string>,
   warehouseUid: string,
   formulaMap: Record<string, string>,
-  productTierFieldUid: string
+  productTierFieldUid: string,
+  priceFallback?: PriceFallback,
 ) {
   // Deduplicate colors — exclude N/A and blanks
   const colors = Array.from(new Set(
@@ -85,13 +106,15 @@ export function buildProductPayload(
       ? ''
       : (product.manufacturer ?? '')
 
+  const { price, estimated } = resolvePrice(product, priceFallback)
+
   const productObj: Record<string, unknown> = {
     prefix: '',
     product_name: product.product_name,
     product_id: String(product.product_id),
     is_available: true,
     product_category: categoryMap[product.product_category] ?? '',
-    price: product.suggested_price ?? 0,
+    price,
     purchase_price: product.purchase_price ?? null,
     min_quantity: 1,
     quantity: 1,
@@ -127,6 +150,9 @@ export function buildProductPayload(
       { hide_field: false, hide_to_fe: false, id: 2, label: 'Color Selection Mandatory', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
       { hide_field: false, hide_to_fe: false, id: 3, label: 'Display Color Selection', read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: '' },
       ...(productTierFieldUid ? [{ hide_field: false, hide_to_fe: false, id: 4, label: 'Product Tier', custom_field_uid: productTierFieldUid, read_only: false, type: 'RADIO', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: mapTier(product.family_tier) }] : []),
+      // Flag products whose price was filled from category-tier medians rather
+      // than real customer data, so CSMs know which to verify post-upload.
+      ...(estimated ? [{ hide_field: false, hide_to_fe: true, id: 5, label: 'Price Source', read_only: true, type: 'SINGLE_LINE', dependent_on: '', dependent_options: [], module_name: 'PRODUCT', value: 'Estimated (category median)' }] : []),
     ],
     option,
   }

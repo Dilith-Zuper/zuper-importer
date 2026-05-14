@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { mapWithLimit } from '@/lib/limit'
+
+const PAGE_FANOUT_LIMIT = 5
 
 const TRADE_CATEGORY: Record<string, string> = {
   gutters: 'GUTTER/ALUMINUM/COIL',
@@ -39,12 +42,14 @@ export async function POST(req: NextRequest) {
 
     const pages: Array<{ manufacturer_norm: string; product_line: string }[]> = [firstPage ?? []]
     if (total && total > PAGE) {
-      const rest = await Promise.all(
-        Array.from({ length: Math.ceil((total - PAGE) / PAGE) }, (_, i) =>
+      const pageCount = Math.ceil((total - PAGE) / PAGE)
+      const rest = await mapWithLimit<number, { manufacturer_norm: string; product_line: string }[]>(
+        Array.from({ length: pageCount }, (_, i) => i),
+        PAGE_FANOUT_LIMIT,
+        (i) =>
           applyFilters(supabase.from('srs_products'))
             .range((i + 1) * PAGE, (i + 2) * PAGE - 1)
             .then((r: any) => r.data ?? [])
-        )
       )
       pages.push(...rest)
     }

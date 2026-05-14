@@ -177,8 +177,12 @@ export function Step4ProductLines() {
   const [gutterSel, setGutterSel]         = useState<Record<string, Set<string>>>({})
   const [sidingSel, setSidingSel]         = useState<Record<string, Set<string>>>({})
   const [loading, setLoading]             = useState(true)
+  const [error, setError]                 = useState<string | null>(null)
+  const [retryNonce, setRetryNonce]       = useState(0)
 
   useEffect(() => {
+    setLoading(true)
+    setError(null)
     const applyLines = (d: Record<string, LineItem[]>, setter: (d: Record<string, LineItem[]>) => void, selSetter: (d: Record<string, Set<string>>) => void, preSelectAll = false) => {
       setter(d)
       const init: Record<string, Set<string>> = {}
@@ -200,8 +204,13 @@ export function Step4ProductLines() {
     if (selectedTrades.includes('siding') && selectedSidingBrands.length) {
       fetches.push(getProductLines(selectedSidingBrands, 'siding').then((d: any) => applyLines(d, setSidingLines, setSidingSel, true)))
     }
-    Promise.all(fetches).then(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    Promise.all(fetches)
+      .then(() => setLoading(false))
+      .catch((e: unknown) => {
+        setError((e as Error).message || 'Failed to load product lines.')
+        setLoading(false)
+      })
+  }, [retryNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleRoofLine = (brand: string, line: string) => {
     if (line === '__all__') return // handled inline in SimpleLineTab
@@ -237,6 +246,17 @@ export function Step4ProductLines() {
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" /></div>
+
+  if (error) return (
+    <div className="space-y-4 py-12 text-center">
+      <p className="text-base font-semibold text-[#1A1A1A]">Couldn&apos;t load product lines</p>
+      <p className="text-sm text-gray-500 max-w-md mx-auto">{error}</p>
+      <button onClick={() => setRetryNonce(n => n + 1)}
+        className="h-10 px-5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-full transition-colors">
+        Try again
+      </button>
+    </div>
+  )
 
   return (
     <div className="space-y-6">

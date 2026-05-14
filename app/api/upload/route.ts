@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { fetchWithRetry, zuperHeaders, chunks, sleep } from '@/lib/zuper-fetch'
-import { buildProductPayload, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
+import { buildProductPayload, type PriceFallback, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
 import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
+import { mapWithLimit } from '@/lib/limit'
+
+const OPTION_GET_CONCURRENCY = 10
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -25,8 +28,17 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (data: object) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      let streamClosed = false
+      const emit = (data: object) => {
+        if (streamClosed) return
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+        } catch {
+          // Controller is closed (client disconnected). Stop further enqueues.
+          streamClosed = true
+        }
+      }
+      req.signal.addEventListener('abort', () => { streamClosed = true })
 
       try {
         // Merge universal accessory IDs into the upload batch (deduplicated)
@@ -57,6 +69,44 @@ export async function POST(req: NextRequest) {
           allVariants.push(...(data as SrsVariant[]))
         }
 
+        // ── Pricing fallback ──────────────────────────────────────────────────
+        // Only 5,646 / 19,807 products have a real `suggested_price`. The rest
+        // would upload as $0 and break proposal math. Build a median map by
+        // (category, family_tier) from the priced subset and pass it through —
+        // products without a price use the closest match; those still without
+        // a fallback land at 0 and are flagged via meta_data so CSMs can fix.
+        const priceFallback: PriceFallback = { byCategoryTier: {}, byCategory: {} }
+        try {
+          const PAGE_PRICE = 1000
+          const priced: { product_category: string; family_tier: string | null; suggested_price: number }[] = []
+          let pfFrom = 0
+          while (!streamClosed) {
+            const { data, error } = await supabase
+              .from('srs_products')
+              .select('product_category, family_tier, suggested_price')
+              .not('suggested_price', 'is', null)
+              .gt('suggested_price', 0)
+              .range(pfFrom, pfFrom + PAGE_PRICE - 1)
+            if (error) break
+            const rows = (data ?? []) as typeof priced
+            priced.push(...rows)
+            if (rows.length < PAGE_PRICE) break
+            pfFrom += PAGE_PRICE
+          }
+          const byCT: Record<string, number[]> = {}
+          const byC:  Record<string, number[]> = {}
+          for (const p of priced) {
+            const cat = p.product_category
+            const tier = p.family_tier ?? 'unknown'
+            const ckt = `${cat}|${tier}`
+            ;(byCT[ckt] ??= []).push(Number(p.suggested_price))
+            ;(byC[cat]  ??= []).push(Number(p.suggested_price))
+          }
+          const median = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
+          for (const [k, arr] of Object.entries(byCT)) priceFallback.byCategoryTier[k] = median(arr)
+          for (const [k, arr] of Object.entries(byC))  priceFallback.byCategory[k] = median(arr)
+        } catch { /* non-fatal — uploaded prices land at 0 */ }
+
         // Group variants by product
         const variantsByProduct = new Map<number, SrsVariant[]>()
         for (const v of allVariants) {
@@ -74,13 +124,47 @@ export async function POST(req: NextRequest) {
         }
 
         let uploaded = 0
+        let updated = 0
         const errors: { productId: number; productName: string; message: string }[] = []
         const productIdMap: Record<string, string> = {}
         // colorCatalogMap: srs_product_id → [{color_name, variant_code, option_uid, purchase_price}]
         const colorCatalogMap: Record<string, Array<{ color_name: string; variant_code: string; option_uid: string; purchase_price: number | null }>> = {}
         const batches = chunks(allProducts, 100)
 
+        // ── Idempotency: fetch existing Zuper products with their SRS product_id
+        // stamp so we can PUT-update them instead of POSTing duplicates on rerun.
+        // Cap at 250 pages (25k products) — guard against runaway loops on
+        // accounts that have unrelated products. Errors here are non-fatal:
+        // we fall back to POST-only mode and may create duplicates the operator
+        // must manually clean.
+        const existingByProductId = new Map<string, string>()
+        try {
+          let page = 1
+          while (page <= 250 && !streamClosed) {
+            const r = await fetchWithRetry(`${baseUrl}products?count=100&page=${page}`, {
+              headers: zuperHeaders(apiKey),
+            })
+            const rows: { product_uid?: string; product_id?: string | number }[] = r.json?.data ?? []
+            if (rows.length === 0) break
+            for (const p of rows) {
+              if (p.product_id && p.product_uid) {
+                existingByProductId.set(String(p.product_id), p.product_uid)
+              }
+            }
+            if (rows.length < 100) break
+            page++
+          }
+          emit({ type: 'idempotency_scan', existingCount: existingByProductId.size })
+        } catch (e: unknown) {
+          // Non-fatal — fall back to POST-only
+          emit({ type: 'idempotency_scan', existingCount: 0, warning: `Existing-product scan failed: ${(e as Error).message}. Re-uploads may create duplicates.` })
+        }
+
         for (const [i, batch] of Array.from(batches.entries())) {
+          // Phase A — POST all products in the batch in parallel. Capture which
+          // ones need a follow-up GET to resolve option_uids (color-bearing products).
+          const needGet: { srsId: number; zuperUid: string; product: SrsProduct }[] = []
+
           await Promise.allSettled(batch.map(async (product) => {
             const payload = buildProductPayload(
               product,
@@ -88,18 +172,28 @@ export async function POST(req: NextRequest) {
               categoryMap,
               warehouseUid,
               formulaMap,
-              productTierFieldUid
+              productTierFieldUid,
+              priceFallback,
             )
             try {
-              const r = await fetchWithRetry(`${baseUrl}product`, {
-                method: 'POST',
+              const existingUid = existingByProductId.get(String(product.product_id))
+              const isUpdate = !!existingUid
+              const url = isUpdate ? `${baseUrl}product/${existingUid}` : `${baseUrl}product`
+              const method = isUpdate ? 'PUT' : 'POST'
+              // For PUT, include product_uid in the payload (Zuper convention).
+              const finalPayload = isUpdate
+                ? { ...payload, product: { ...payload.product, product_uid: existingUid } }
+                : payload
+              const r = await fetchWithRetry(url, {
+                method,
                 headers: zuperHeaders(apiKey),
-                body: JSON.stringify(payload),
+                body: JSON.stringify(finalPayload),
               })
               if (r.ok && (r.json?.type === 'success' || r.json?.data)) {
-                uploaded++
+                if (isUpdate) updated++
+                else uploaded++
                 const productData = Array.isArray(r.json?.data) ? r.json.data[0] : r.json?.data
-                const zuperUid = productData?.product_uid ?? ''
+                const zuperUid = productData?.product_uid ?? existingUid ?? ''
                 if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
 
                 const productVariants = variantsByProduct.get(product.product_id) ?? []
@@ -108,25 +202,10 @@ export async function POST(req: NextRequest) {
                   return c && c !== 'N/A' && c.toLowerCase() !== 'na'
                 })
 
-                let optionValues: Array<{ option_uid: string; option_value: string }> = []
                 if (zuperUid && hasColors) {
-                  // POST response doesn't reliably include option UIDs — GET the product to retrieve them
-                  const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
-                    headers: zuperHeaders(apiKey),
-                  })
-                  const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
-                  optionValues = getProductData?.option?.option_values ?? []
-                }
-
-                if (optionValues.length > 0) {
-                  const colorMap = variantCodeByColor.get(product.product_id)
-                  const entries = optionValues.map(ov => ({
-                    color_name: ov.option_value,
-                    variant_code: colorMap?.get(ov.option_value) ?? '',
-                    option_uid: ov.option_uid,
-                    purchase_price: product.purchase_price,
-                  }))
-                  colorCatalogMap[String(product.product_id)] = entries
+                  // Defer the GET — process in Phase B with bounded concurrency
+                  // so we don't serialize ~100 GETs after the POST batch.
+                  needGet.push({ srsId: product.product_id, zuperUid, product })
                 } else if (productVariants.some(v => v.variant_code)) {
                   // No color options — store all variant codes for vendor catalog (no option mapping)
                   const variantEntries = productVariants
@@ -142,7 +221,7 @@ export async function POST(req: NextRequest) {
                   }
                 }
 
-                emit({ type: 'progress', status: 'success', productName: product.product_name, uploaded, total: allProducts.length })
+                emit({ type: 'progress', status: isUpdate ? 'updated' : 'success', productName: product.product_name, uploaded, updated, total: allProducts.length })
               } else {
                 const msg = r.json?.message ?? JSON.stringify(r.json)
                 errors.push({ productId: product.product_id, productName: product.product_name, message: msg })
@@ -155,7 +234,32 @@ export async function POST(req: NextRequest) {
             }
           }))
 
-          emit({ type: 'batch_complete', batch: i + 1, of: batches.length, uploaded, errors: errors.length })
+          // Phase B — fetch option_uids for color-bearing products in parallel
+          // (capped at OPTION_GET_CONCURRENCY). Failures are non-fatal: the product
+          // is already uploaded, only vendor-catalog option mapping is lost.
+          if (needGet.length > 0 && !streamClosed) {
+            await mapWithLimit(needGet, OPTION_GET_CONCURRENCY, async ({ srsId, zuperUid, product }) => {
+              try {
+                const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
+                  headers: zuperHeaders(apiKey),
+                })
+                const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
+                const optionValues: Array<{ option_uid: string; option_value: string }> = getProductData?.option?.option_values ?? []
+                if (optionValues.length > 0) {
+                  const colorMap = variantCodeByColor.get(srsId)
+                  colorCatalogMap[String(srsId)] = optionValues.map(ov => ({
+                    color_name: ov.option_value,
+                    variant_code: colorMap?.get(ov.option_value) ?? '',
+                    option_uid: ov.option_uid,
+                    purchase_price: product.purchase_price,
+                  }))
+                }
+              } catch { /* non-fatal — product is uploaded, vendor catalog skips this one */ }
+            })
+          }
+
+          emit({ type: 'batch_complete', batch: i + 1, of: batches.length, uploaded, updated, errors: errors.length })
+          if (streamClosed) break
           if (i < batches.length - 1) await sleep(3000)
         }
 
@@ -200,10 +304,10 @@ export async function POST(req: NextRequest) {
           }))
         }
 
-        emit({ type: 'done', uploaded, skipped: 0, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
+        emit({ type: 'done', uploaded, updated, skipped: 0, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
-        emit({ type: 'done', error: (e as Error).message, uploaded: 0, skipped: 0, errors: [] })
+        emit({ type: 'done', error: (e as Error).message, uploaded: 0, updated: 0, skipped: 0, errors: [] })
         controller.close()
       }
     },

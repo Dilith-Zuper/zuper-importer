@@ -3,6 +3,9 @@
  * These cover the commodity items (drip edge, nails, underlayment, flashing, pipe boots,
  * ridge vent, starter, caulk) that 89% of accounts carry as generic/unbranded stock.
  * SRS has branded equivalents for all — same set for every account, not brand-tied.
+ *
+ * To revalidate or replace any entry: run `node find-accessory-gaps.js` from the
+ * product-importer dir for that specific proposal_line_item.
  */
 export const ACCESSORY_PRODUCT_IDS: number[] = [
   // Drip Edge
@@ -22,7 +25,8 @@ export const ACCESSORY_PRODUCT_IDS: number[] = [
   79025,   // National Nail — ProFIT Coil Nails
 
   // Plastic Cap Nails
-  91472,   // National Nail — Stinger EG RS Plastic Cap Nails
+  91472,   // National Nail — Stinger EG RS Plastic Cap Nails (DB-classified as Fasteners)
+  79219,   // National Nail — Stinger Plastic Cap NailPac (proposal_line_item = Plastic Cap Nails)
 
   // Step Flashing
   135477,  // Verde — Steel Step Flashing
@@ -47,6 +51,9 @@ export const ACCESSORY_PRODUCT_IDS: number[] = [
 
   // Caulk / Sealant
   194970,  // G.A.P. — DYNAFLEX Caulk
+
+  // Counter / Headwall Flashing — Bay Cities (5 SKUs in catalog, workhorse brand)
+  75999,   // Bay Cities Metal — Bay Cities Counter Flashing
 ]
 
 export const ACCESSORY_COUNT = ACCESSORY_PRODUCT_IDS.length

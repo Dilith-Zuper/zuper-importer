@@ -5,6 +5,7 @@ import { REQUIRED_TOKENS } from '@/lib/token-definitions'
 import { FORMULA_DEFINITIONS } from '@/lib/formula-definitions'
 import { UOM_MAP } from '@/lib/uom-map'
 import { SERVICE_CATEGORY_LABELS } from '@/lib/service-catalog'
+import { invalidate as invalidateCache } from '@/lib/zuper-cache'
 import type { TokenInfo } from '@/types/wizard'
 
 export const dynamic = 'force-dynamic'
@@ -21,8 +22,16 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
-      const enqueue = (data: object) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      let streamClosed = false
+      const enqueue = (data: object) => {
+        if (streamClosed) return
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+        } catch {
+          streamClosed = true
+        }
+      }
+      req.signal.addEventListener('abort', () => { streamClosed = true })
 
       try {
         // ── Fetch products needed ──────────────────────────────────────────────
@@ -69,6 +78,7 @@ export async function POST(req: NextRequest) {
               created++
             }
           }
+          if (created > 0) invalidateCache(apiKey, 'categories')
           enqueue({ check: 'categories', status: 'pass', detail: `${requiredCategories.length} categories ready (${created} created)` })
         } catch (e: unknown) {
           enqueue({ check: 'categories', status: 'fail', detail: (e as Error).message })
@@ -211,6 +221,7 @@ export async function POST(req: NextRequest) {
             formulaMap[def.formula_key] = uid
           }
 
+          if (created > 0) invalidateCache(apiKey, 'formulas')
           enqueue({ check: 'formulas', status: 'pass', detail: `${FORMULA_DEFINITIONS.length} formulas ready (${created} created)` })
         } catch (e: unknown) {
           enqueue({ check: 'formulas', status: 'fail', detail: (e as Error).message })

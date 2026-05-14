@@ -5,6 +5,59 @@ type MapEntry = MeasEntry | ConstEntry
 const m = (field_name: string): MeasEntry => ({ type: 'MEASUREMENT', field_name })
 const c = (value: number): ConstEntry => ({ type: 'CONSTANT', value })
 
+/**
+ * Magic numbers used in roof-quantity formulas. Every constant should be
+ * justified here, not buried as a literal in an `expression_map`. Update both
+ * the map and the formula entry together.
+ *
+ * Sources:
+ *   "CSM medians"  → derived from 54 real customer accounts (us_east + us_west
+ *                    *_zuper_service.cpq_formula.csv). See Token_Analysis.xlsx.
+ *   "Industry std" → standard roofing trade convention.
+ *   "Mfr packaging"→ from manufacturer (GAF/CertainTeed/OC) packaging specs.
+ *
+ * If a customer needs a different value (e.g. CertainTeed Landmark wraps 32 LF/
+ * bundle, not 33), override per-account via the formula admin once that feature
+ * lands (see plan P1-5 future scope).
+ */
+export const FORMULA_CONSTANTS = {
+  // Roofing standards
+  SQFT_PER_SQUARE: 100,           // Industry std — 1 SQ = 100 SQFT.
+  PCT_DIVISOR: 100,               // Industry std — turns waste % into a fraction.
+
+  // Hip & ridge bundles
+  HIP_RIDGE_LF_PER_BUNDLE: 33,    // CSM medians — corrected from 35 (older spec).
+
+  // Starter bundles
+  STARTER_LF_PER_BUNDLE: 120,     // CSM medians — uses Eaves+Rakes, not a Starter token.
+
+  // Ice & water
+  ICE_WATER_OVERLAP_FACTOR: 1.1,  // Industry std — 10% overlap on each course.
+  ICE_WATER_LF_PER_ROLL: 66,      // Mfr packaging — 3' wide × 66' long roll.
+
+  // Drip edge / gutter apron / valley
+  PIECE_LF: 10,                   // Industry std — 10' bar / piece.
+
+  // Coil nails
+  NAILS_PER_SQFT: 3.2,            // Industry std — 4 nails per shingle × 12 shingles / 100 SQFT plus laps.
+  NAILS_PER_BOX: 3600,            // Mfr packaging — 3,600 nails / box.
+
+  // Plastic cap nails
+  CAP_NAILS_SQFT_PER_BOX: 400,    // Mfr packaging — covers ~400 SQFT.
+
+  // Vents
+  RIDGE_VENT_LF_PER_PIECE: 4,     // Mfr packaging — Lomanco LPR-10 is 10', but ridge vent install is 4' sections (industry std).
+
+  // Underlayment — roll lengths in SQFT
+  UNDERLAYMENT_SYNTHETIC_SQFT_PER_ROLL: 1000,   // Mfr packaging — 10 SQ rolls.
+  UNDERLAYMENT_FELT_15_SQFT_PER_ROLL: 400,      // Mfr packaging — 4 SQ rolls.
+  UNDERLAYMENT_FELT_30_SQFT_PER_ROLL: 200,      // Mfr packaging — 2 SQ rolls.
+  UNDERLAYMENT_HT_SQFT_PER_ROLL: 200,           // Mfr packaging — 2 SQ rolls (self-adhered HT).
+
+  // Decking
+  DECKING_SQFT_PER_SHEET: 32,     // Industry std — 4'×8' OSB = 32 SQFT.
+} as const
+
 export interface FormulaDefinition {
   formula_name: string
   formula_key: string
@@ -240,6 +293,84 @@ export const FORMULA_DEFINITIONS: FormulaDefinition[] = [
     expression_map: [m('Total Roof Area'), c(32), m('Suggested Waste Percentage %'), c(100)],
     rounding_mechanism: 'NEXT_WHOLE_NUMBER',
     proposal_line_items: ['Roof Decking (OSB)'],
+  },
+
+  // ── Slope-based service formulas ─────────────────────────────────────────
+  // These compute squares of roof by slope band; the per-slope service line
+  // items in the proposal use these so quantities auto-route from the
+  // measurement report. proposal_line_items is empty because these don't
+  // map to a product line item — they're service-only.
+  {
+    formula_name: 'Tear Off — Low Slope (squares)',
+    formula_key: 'tear_off_low_slope_sq',
+    formula_description: 'Low-slope area / 100 SQFT per square — drives Low Slope tear-off service quantity',
+    expression: '$1/$2',
+    expression_map: [m('Low Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Tear Off — Standard Slope (squares)',
+    formula_key: 'tear_off_standard_slope_sq',
+    formula_description: 'Standard-slope area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Standard Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Tear Off — Steep Slope (squares)',
+    formula_key: 'tear_off_steep_slope_sq',
+    formula_description: 'Steep-slope area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Steep Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Tear Off — Very Steep (squares)',
+    formula_key: 'tear_off_very_steep_sq',
+    formula_description: 'Very-steep area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Very Steep Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Shingle Install — Low Slope (squares)',
+    formula_key: 'shingle_install_low_slope_sq',
+    formula_description: 'Low-slope area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Low Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Shingle Install — Standard Slope (squares)',
+    formula_key: 'shingle_install_standard_slope_sq',
+    formula_description: 'Standard-slope area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Standard Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Shingle Install — Steep Slope (squares)',
+    formula_key: 'shingle_install_steep_slope_sq',
+    formula_description: 'Steep-slope area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Steep Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
+  },
+  {
+    formula_name: 'Shingle Install — Very Steep (squares)',
+    formula_key: 'shingle_install_very_steep_sq',
+    formula_description: 'Very-steep area / 100 SQFT per square',
+    expression: '$1/$2',
+    expression_map: [m('Very Steep Slope'), c(100)],
+    rounding_mechanism: 'NEXT_WHOLE_NUMBER',
+    proposal_line_items: [],
   },
 ]
 
