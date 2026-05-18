@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-05-18
+
 ### Added
 - **QXO catalog support** as an alternate data source alongside SRS.
   - New **Step 2: Source** screen — pick SRS Distribution or QXO; QXO requires a branch (621 stocking branches, searchable, grouped by region).
