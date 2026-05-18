@@ -35,14 +35,23 @@ export async function POST(req: NextRequest) {
       req.signal.addEventListener('abort', () => { streamClosed = true })
 
       try {
-        // ── Fetch products needed ──────────────────────────────────────────────
-        const { data: products, error: pErr } = await supabase
-          .from('srs_products')
-          .select('product_id, product_category')
-          .in('product_id', productIds)
-        if (pErr) throw new Error(pErr.message)
-
-        const requiredCategories = Array.from(new Set(products.map(p => p.product_category as string)))
+        // ── Fetch product categories ──────────────────────────────────────────
+        // Chunk the .in() — Supabase encodes the array into the URL, and a
+        // long productIds list (>~1500 IDs) exceeds PostgREST URL limits and
+        // the request fails silently, taking the whole stream down with no
+        // events emitted to the client.
+        const IN_CHUNK = 500
+        const categorySet = new Set<string>()
+        for (let i = 0; i < productIds.length; i += IN_CHUNK) {
+          const slice = productIds.slice(i, i + IN_CHUNK)
+          const { data, error: pErr } = await supabase
+            .from('srs_products')
+            .select('product_category')
+            .in('product_id', slice)
+          if (pErr) throw new Error(`Supabase fetch (${slice.length} ids): ${pErr.message}`)
+          for (const row of data ?? []) categorySet.add(row.product_category as string)
+        }
+        const requiredCategories = Array.from(categorySet)
 
         // ── Check 1: Categories ───────────────────────────────────────────────
         enqueue({ check: 'categories', status: 'running', detail: 'Fetching existing categories…' })
@@ -342,8 +351,10 @@ export async function POST(req: NextRequest) {
         enqueue({ check: 'done', categoryMap, warehouseUid, tokenMap, formulaMap, productTierFieldUid, serviceCategoryMap })
         controller.close()
       } catch (e: unknown) {
-        enqueue({ check: 'done', error: (e as Error).message })
-        controller.close()
+        const msg = (e as Error)?.message ?? String(e)
+        console.error('[validate] top-level error:', msg, e)
+        try { enqueue({ check: 'done', error: msg }) } catch {}
+        try { controller.close() } catch {}
       }
     },
   })
