@@ -34,7 +34,11 @@ export function ChecklistItem({ label, status, detail }: { label: string; status
       {icon}
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900 text-sm">{label}</p>
-        {detail && <p className="text-xs text-gray-500 mt-0.5 truncate">{detail}</p>}
+        {detail && (
+          <p className={`text-xs mt-0.5 ${status === 'fail' ? 'text-red-600 whitespace-pre-wrap break-words' : 'text-gray-500 truncate'}`}>
+            {detail}
+          </p>
+        )}
       </div>
       <div className="flex-shrink-0">
         {status === 'pass' && (

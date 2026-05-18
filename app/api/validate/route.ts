@@ -5,6 +5,7 @@ import { REQUIRED_TOKENS } from '@/lib/token-definitions'
 import { FORMULA_DEFINITIONS } from '@/lib/formula-definitions'
 import { UOM_MAP } from '@/lib/uom-map'
 import { SERVICE_CATEGORY_LABELS } from '@/lib/service-catalog'
+import { toZuperCategoryName } from '@/lib/category-norm'
 import { invalidate as invalidateCache } from '@/lib/zuper-cache'
 import type { TokenInfo } from '@/types/wizard'
 
@@ -64,16 +65,24 @@ export async function POST(req: NextRequest) {
 
           let created = 0
           for (const catName of requiredCategories) {
-            if (existing[catName.toLowerCase()]) {
-              categoryMap[catName] = existing[catName.toLowerCase()]
+            // Map SRS name (e.g. "TOOLS/SAFETY") → Zuper-safe name (e.g. "Tools & Safety").
+            // Look up by sanitized name first, then legacy raw SRS name for backward
+            // compatibility with accounts that ran the wizard before this change.
+            const zuperName = toZuperCategoryName(catName)
+            const existingUid = existing[zuperName.toLowerCase()] ?? existing[catName.toLowerCase()]
+            if (existingUid) {
+              categoryMap[catName] = existingUid
             } else {
               const r = await fetchWithRetry(`${baseUrl}products/category`, {
                 method: 'POST',
                 headers: zuperHeaders(apiKey),
-                body: JSON.stringify({ product_category: { category_name: catName, category_description: '', bu_uids: [], parent_category_uid: null } }),
+                body: JSON.stringify({ product_category: { category_name: zuperName, category_description: '', bu_uids: [], parent_category_uid: null } }),
               })
               const uid = r.json?.data?.category_uid ?? r.json?.data?.product_category_uid
-              if (!uid) throw new Error(`Failed to create category: ${catName}`)
+              if (!uid) {
+                const body = JSON.stringify(r.json ?? {}).slice(0, 300)
+                throw new Error(`Failed to create category "${zuperName}" (SRS: "${catName}") — HTTP ${r.status}: ${body}`)
+              }
               categoryMap[catName] = uid
               created++
             }
