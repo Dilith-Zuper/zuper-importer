@@ -7,18 +7,24 @@ import { UOM_MAP } from '@/lib/uom-map'
 import { SERVICE_CATEGORY_LABELS } from '@/lib/service-catalog'
 import { toZuperCategoryName } from '@/lib/category-norm'
 import { invalidate as invalidateCache } from '@/lib/zuper-cache'
-import type { TokenInfo } from '@/types/wizard'
+import { catalogConfig } from '@/lib/catalog-source'
+import type { TokenInfo, CatalogSource } from '@/types/wizard'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
-  const { baseUrl, apiKey, productIds, selectedTrades = ['roofing'] } = await req.json() as {
+  const {
+    baseUrl, apiKey, productIds, selectedTrades = ['roofing'],
+    catalogSource = 'srs',
+  } = await req.json() as {
     baseUrl: string
     apiKey: string
-    productIds: number[]
+    productIds: (number | string)[]
     selectedTrades?: string[]
+    catalogSource?: CatalogSource
   }
+  const cfg = catalogConfig(catalogSource)
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -44,12 +50,21 @@ export async function POST(req: NextRequest) {
         const categorySet = new Set<string>()
         for (let i = 0; i < productIds.length; i += IN_CHUNK) {
           const slice = productIds.slice(i, i + IN_CHUNK)
-          const { data, error: pErr } = await supabase
-            .from('srs_products')
-            .select('product_category')
-            .in('product_id', slice)
+          let q: any
+          if (cfg.source === 'srs') {
+            q = supabase.from('srs_products')
+              .select('product_category')
+              .in('product_id', slice.map(Number))
+          } else {
+            q = supabase.from('qxo_products')
+              .select('product_category:category_norm')
+              .in('product_key', slice.map(String))
+          }
+          const { data, error: pErr } = await q
           if (pErr) throw new Error(`Supabase fetch (${slice.length} ids): ${pErr.message}`)
-          for (const row of data ?? []) categorySet.add(row.product_category as string)
+          for (const row of (data ?? []) as { product_category: string | null }[]) {
+            if (row.product_category) categorySet.add(row.product_category)
+          }
         }
         const requiredCategories = Array.from(categorySet)
 

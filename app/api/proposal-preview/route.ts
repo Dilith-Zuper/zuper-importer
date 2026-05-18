@@ -4,7 +4,7 @@ import { ITEM_TO_FORMULA_KEY } from '@/lib/formula-definitions'
 import { normalizeCategory } from '@/lib/category-norm'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 import { rulesForBrand, type ProposalTier, type TierUpgradeRule } from '@/lib/tier-upgrade-rules'
-import type { ProposalLineItem, BrandPackage } from '@/types/wizard'
+import type { ProposalLineItem, BrandPackage, CatalogSource } from '@/types/wizard'
 
 const CPQ_CATEGORIES = ['SHINGLES', 'HIP AND RIDGE', 'STARTER', 'UNDERLAYMENT', 'ICE AND WATER', 'VENTS']
 const CPQ_COMPONENTS = ['Shingles', 'Hip & Ridge Cap', 'Starter Strip', 'Underlayment — Synthetic', 'Underlayment — Felt 30#', 'Ice & Water — Standard', 'Ice & Water — High Temp', 'Box Vent', 'Ridge Vent']
@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       selectedTrades = ['roofing'],
       selectedGutterBrands = [], selectedGutterProductLines = {},
       selectedSidingBrands  = [], selectedSidingProductLines  = {},
+      catalogSource = 'srs',
     } = await req.json() as {
       selectedBrands: string[]
       selectedProductLines: Record<string, string[]>
@@ -81,6 +82,18 @@ export async function POST(req: NextRequest) {
       selectedGutterProductLines?: Record<string, string[]>
       selectedSidingBrands?: string[]
       selectedSidingProductLines?: Record<string, string[]>
+      catalogSource?: CatalogSource
+    }
+
+    // QXO proposal templates are not yet wired into the G/B/B engine. The
+    // SRS-specific tier rules, accessory catalog mapping, and primary_item
+    // ordering all assume SRS shape. We return an empty result with a marker
+    // so the UI can show a "skip templates" affordance and proceed.
+    if (catalogSource === 'qxo') {
+      return NextResponse.json({
+        __unsupported: 'qxo',
+        __message: 'Proposal templates not yet available for QXO. Build templates manually in Zuper, or switch to SRS.',
+      })
     }
 
     const result: Record<string, BrandPackage | ProposalLineItem[]> = {}

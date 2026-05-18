@@ -10,6 +10,7 @@ export function Step9Vendor() {
     baseUrl, apiKey, companyName,
     productIdMap, colorCatalogMap,
     setStep,
+    catalogSource,
   } = useWizardStore()
 
   const [phase, setPhase]           = useState<Phase>('preview')
@@ -36,7 +37,7 @@ export function Step9Vendor() {
       const response = await fetch('/api/create-vendor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl, apiKey, productIdMap, colorCatalogMap }),
+        body: JSON.stringify({ baseUrl, apiKey, productIdMap, colorCatalogMap, catalogSource }),
       })
 
       if (!response.ok || !response.body) {
@@ -172,7 +173,7 @@ export function Step9Vendor() {
 
       {phase === 'done' && (
         <button
-          onClick={() => setStep(10)}
+          onClick={() => setStep(11)}
           className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
         >
           Build Proposal Templates →
@@ -181,14 +182,14 @@ export function Step9Vendor() {
 
       {(phase === 'done' || phase === 'error') && (
         <button
-          onClick={() => setStep(10)}
+          onClick={() => setStep(11)}
           className="w-full h-11 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-sm"
         >
           Skip to Proposal Templates →
         </button>
       )}
 
-      <button onClick={() => setStep(8)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+      <button onClick={() => setStep(9)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
         ← Back
       </button>
     </div>

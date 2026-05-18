@@ -81,7 +81,9 @@ export function Step3Brands() {
     companyName, selectedTrades,
     setSelectedBrands, setSelectedGutterBrands, setSelectedSidingBrands,
     setStep,
+    catalogSource, selectedQxoBranch,
   } = useWizardStore()
+  const srcArgs = { catalogSource, branchNum: selectedQxoBranch?.branchNum }
 
   const [activeTab, setActiveTab] = useState<Trade>(selectedTrades[0] ?? 'roofing')
 
@@ -110,7 +112,7 @@ export function Step3Brands() {
 
     if (selectedTrades.includes('roofing')) {
       fetches.push(
-        getBrands('roofing').then((d: any) => {
+        getBrands('roofing', srcArgs).then((d: any) => {
           const b3: BrandItem[] = d.big3 ?? []
           setBig3(b3); setTopSecondary(d.topSecondary ?? []); setOtherBrands(d.otherBrands ?? [])
           setRoofingSelected(new Set(b3.map((b: BrandItem) => b.name)))
@@ -118,10 +120,10 @@ export function Step3Brands() {
       )
     }
     if (selectedTrades.includes('gutters')) {
-      fetches.push(getBrands('gutters').then((d: any) => setGutterBrands(d.brands ?? [])))
+      fetches.push(getBrands('gutters', srcArgs).then((d: any) => setGutterBrands(d.brands ?? [])))
     }
     if (selectedTrades.includes('siding')) {
-      fetches.push(getBrands('siding').then((d: any) => setSidingBrands(d.brands ?? [])))
+      fetches.push(getBrands('siding', srcArgs).then((d: any) => setSidingBrands(d.brands ?? [])))
     }
 
     Promise.all(fetches)
@@ -136,7 +138,7 @@ export function Step3Brands() {
   useEffect(() => {
     if (roofingSelected.size === 0) return
     const timer = setTimeout(() => {
-      prefetchProductLines(Array.from(roofingSelected), 'roofing')
+      prefetchProductLines(Array.from(roofingSelected), 'roofing', srcArgs)
     }, 400)
     return () => clearTimeout(timer)
   }, [roofingSelected])
@@ -144,7 +146,7 @@ export function Step3Brands() {
   useEffect(() => {
     if (gutterSelected.size === 0) return
     const timer = setTimeout(() => {
-      prefetchProductLines(Array.from(gutterSelected), 'gutters')
+      prefetchProductLines(Array.from(gutterSelected), 'gutters', srcArgs)
     }, 400)
     return () => clearTimeout(timer)
   }, [gutterSelected])
@@ -152,7 +154,7 @@ export function Step3Brands() {
   useEffect(() => {
     if (sidingSelected.size === 0) return
     const timer = setTimeout(() => {
-      prefetchProductLines(Array.from(sidingSelected), 'siding')
+      prefetchProductLines(Array.from(sidingSelected), 'siding', srcArgs)
     }, 400)
     return () => clearTimeout(timer)
   }, [sidingSelected])
@@ -175,7 +177,7 @@ export function Step3Brands() {
     if (selectedTrades.includes('roofing')) setSelectedBrands(Array.from(roofingSelected))
     if (selectedTrades.includes('gutters')) setSelectedGutterBrands(Array.from(gutterSelected))
     if (selectedTrades.includes('siding'))  setSelectedSidingBrands(Array.from(sidingSelected))
-    setStep(4)
+    setStep(5)
   }
 
   const filteredOthers = roofSearch
@@ -276,7 +278,7 @@ export function Step3Brands() {
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold rounded-full transition-colors text-base">
         Continue →
       </button>
-      <button onClick={() => setStep(2)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+      <button onClick={() => setStep(3)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
         ← Back to trade selection
       </button>
     </div>

@@ -4,6 +4,7 @@ import { useWizardStore } from '@/store/wizard-store'
 import { NoToast } from '@/components/ui/NoToast'
 import { GuidePanel } from '@/components/ui/GuidePanel'
 import { Step1Connect }      from './Step1Connect'
+import { Step2Source }       from './Step2Source'
 import { Step2Trades }       from './Step2Trades'
 import { Step3Brands }       from './Step3Brands'
 import { Step4ProductLines } from './Step4ProductLines'
@@ -16,6 +17,7 @@ import { Step10Proposals }   from './Step10Proposals'
 
 const STEPS = [
   { label: 'Connect',   short: 'Connect'  },
+  { label: 'Source',    short: 'Source'   },
   { label: 'Trades',    short: 'Trades'   },
   { label: 'Brands',    short: 'Brands'   },
   { label: 'Lines',     short: 'Lines'    },
@@ -117,16 +119,17 @@ export function WizardShell() {
 
       {/* Content */}
       <main className="max-w-[760px] mx-auto px-6 py-12">
-        {step === 1 && <Step1Connect />}
-        {step === 2 && <Step2Trades />}
-        {step === 3 && <Step3Brands />}
-        {step === 4 && <Step4ProductLines />}
-        {step === 5 && <Step4Preview />}
-        {step === 6 && <Step5Validate />}
-        {step === 7 && <Step6Upload />}
-        {step === 8  && <Step7Done />}
-        {step === 9  && <Step9Vendor />}
-        {step === 10 && <Step10Proposals />}
+        {step === 1  && <Step1Connect />}
+        {step === 2  && <Step2Source />}
+        {step === 3  && <Step2Trades />}
+        {step === 4  && <Step3Brands />}
+        {step === 5  && <Step4ProductLines />}
+        {step === 6  && <Step4Preview />}
+        {step === 7  && <Step5Validate />}
+        {step === 8  && <Step6Upload />}
+        {step === 9  && <Step7Done />}
+        {step === 10 && <Step9Vendor />}
+        {step === 11 && <Step10Proposals />}
       </main>
     </div>
   )

@@ -17,7 +17,7 @@ const CHECK_LABELS: Record<string, string> = {
 const CHECK_ORDER = ['categories', 'warehouse', 'tokens', 'formulas', 'uoms', 'tier_field', 'service_categories'] as const
 
 export function Step5Validate() {
-  const { apiKey, baseUrl, filteredProductIds, selectedTrades, companyName, setValidationResult, setValidationData, setStep } = useWizardStore()
+  const { apiKey, baseUrl, filteredProductIds, selectedTrades, companyName, setValidationResult, setValidationData, setStep, catalogSource } = useWizardStore()
   const [results, setResults] = useState<Record<string, ValidationResult>>({})
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -38,7 +38,7 @@ export function Step5Validate() {
         const response = await fetch('/api/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds, selectedTrades }),
+          body: JSON.stringify({ baseUrl, apiKey, productIds: filteredProductIds, selectedTrades, catalogSource }),
         })
 
         if (!response.ok || !response.body) {
@@ -128,7 +128,7 @@ export function Step5Validate() {
             ✓ All checks passed — Ready to import {filteredProductIds.length.toLocaleString()} products to {companyName}
           </div>
           <button
-            onClick={() => setStep(7)}
+            onClick={() => setStep(8)}
             className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
           >
             Begin Upload →

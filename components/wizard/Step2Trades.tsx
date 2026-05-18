@@ -48,14 +48,20 @@ const TRADE_DEFS: { id: Trade; label: string; description: string; count: string
 ]
 
 export function Step2Trades() {
-  const { companyName, selectedTrades, setSelectedTrades, setStep } = useWizardStore()
+  const {
+    companyName, selectedTrades, setSelectedTrades, setStep,
+    catalogSource, selectedQxoBranch,
+  } = useWizardStore()
 
-  // Warm up all three brand lists while user reads this page
+  // Warm up all three brand lists while user reads this page. Bound source
+  // and branch into the cache key — SRS vs QXO returns totally different brand
+  // lists, and QXO is further filtered by branch.
   useEffect(() => {
-    prefetchBrands('roofing')
-    prefetchBrands('gutters')
-    prefetchBrands('siding')
-  }, [])
+    const src = { catalogSource, branchNum: selectedQxoBranch?.branchNum }
+    prefetchBrands('roofing', src)
+    prefetchBrands('gutters', src)
+    prefetchBrands('siding',  src)
+  }, [catalogSource, selectedQxoBranch?.branchNum])
 
   const toggle = (id: Trade) => {
     const current = new Set(selectedTrades)
@@ -128,15 +134,15 @@ export function Step2Trades() {
       </div>
 
       <button
-        onClick={() => setStep(3)}
+        onClick={() => setStep(4)}
         disabled={selectedTrades.length === 0}
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold rounded-full transition-colors text-base"
       >
         Continue with {selectedTrades.map(t => TRADE_DEFS.find(d => d.id === t)!.label).join(' + ')} →
       </button>
 
-      <button onClick={() => setStep(1)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
-        ← Back to Connect
+      <button onClick={() => setStep(2)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+        ← Back to Source
       </button>
     </div>
   )

@@ -5,7 +5,10 @@ import { buildProductPayload, type PriceFallback, type SrsProduct, type SrsVaria
 import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
+import { QXO_ACCESSORY_PRODUCT_KEYS } from '@/lib/qxo-accessory-catalog'
 import { mapWithLimit } from '@/lib/limit'
+import { catalogConfig } from '@/lib/catalog-source'
+import type { CatalogSource } from '@/types/wizard'
 
 const OPTION_GET_CONCURRENCY = 10
 
@@ -13,17 +16,24 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
-  const { baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid, selectedTrades = ['roofing'], serviceCategoryMap = {} } = await req.json() as {
+  const {
+    baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap,
+    productTierFieldUid, selectedTrades = ['roofing'], serviceCategoryMap = {},
+    catalogSource = 'srs',
+  } = await req.json() as {
     baseUrl: string
     apiKey: string
-    productIds: number[]
+    productIds: (number | string)[]
     categoryMap: Record<string, string>
     warehouseUid: string
     formulaMap: Record<string, string>
     productTierFieldUid: string
     selectedTrades?: string[]
     serviceCategoryMap?: Record<string, string>
+    catalogSource?: CatalogSource
   }
+
+  const cfg = catalogConfig(catalogSource)
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -34,7 +44,6 @@ export async function POST(req: NextRequest) {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         } catch {
-          // Controller is closed (client disconnected). Stop further enqueues.
           streamClosed = true
         }
       }
@@ -42,51 +51,121 @@ export async function POST(req: NextRequest) {
 
       try {
         // Merge universal accessory IDs into the upload batch (deduplicated)
-        const allProductIds = [...new Set([...ACCESSORY_PRODUCT_IDS, ...productIds])]
+        const accessoryIds: (number | string)[] = cfg.source === 'srs'
+          ? ACCESSORY_PRODUCT_IDS
+          : QXO_ACCESSORY_PRODUCT_KEYS
+        const seen = new Set<string>()
+        const allProductIds: (number | string)[] = []
+        for (const id of [...accessoryIds, ...productIds]) {
+          const k = String(id)
+          if (seen.has(k)) continue
+          seen.add(k)
+          allProductIds.push(id)
+        }
 
-        // Fetch all products + their unrestricted variants
-        const PAGE = 1000
+        // Fetch products + variants — branch by catalog source. We materialize
+        // both into the `SrsProduct` shape (the builder is agnostic about
+        // origin); QXO products map brand_norm → manufacturer_norm,
+        // category_norm → product_category, product_key → product_id (as int
+        // if possible — Zuper accepts strings via the cast in builder).
         const allProducts: SrsProduct[] = []
-        for (let from = 0; from < allProductIds.length; from += PAGE) {
-          const chunk = allProductIds.slice(from, from + PAGE)
-          const { data, error } = await supabase
-            .from('srs_products')
-            .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, purchase_price, proposal_line_item, family_tier')
-            .in('product_id', chunk)
-          if (error) throw new Error(error.message)
-          allProducts.push(...(data as SrsProduct[]))
-        }
-
         const allVariants: SrsVariant[] = []
-        for (let from = 0; from < allProductIds.length; from += 500) {
-          const chunk = allProductIds.slice(from, from + 500)
-          const { data, error } = await supabase
-            .from('srs_variants')
-            .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
-            .in('product_id', chunk)
-            .eq('is_restricted', false)
-          if (error) throw new Error(error.message)
-          allVariants.push(...(data as SrsVariant[]))
+        const PAGE = 1000
+
+        if (cfg.source === 'srs') {
+          const ids = allProductIds.map(Number)
+          for (let from = 0; from < ids.length; from += PAGE) {
+            const chunk = ids.slice(from, from + PAGE)
+            const { data, error } = await supabase
+              .from('srs_products')
+              .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, purchase_price, proposal_line_item, family_tier')
+              .in('product_id', chunk)
+            if (error) throw new Error(error.message)
+            allProducts.push(...(data as SrsProduct[]))
+          }
+          for (let from = 0; from < ids.length; from += 500) {
+            const chunk = ids.slice(from, from + 500)
+            const { data, error } = await supabase
+              .from('srs_variants')
+              .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
+              .in('product_id', chunk)
+              .eq('is_restricted', false)
+            if (error) throw new Error(error.message)
+            allVariants.push(...(data as SrsVariant[]))
+          }
+        } else {
+          // QXO — keys are TEXT (e.g. "C-412281"). Map rows into SrsProduct.
+          const keys = allProductIds.map(String)
+          for (let from = 0; from < keys.length; from += PAGE) {
+            const chunk = keys.slice(from, from + PAGE)
+            const { data, error } = await supabase
+              .from('qxo_products')
+              .select('product_key, product_name, category_norm, brand_raw, brand_norm, description_short, suggested_price, proposal_line_item, family_tier, product_image_url:brand_image_url')
+              .in('product_key', chunk)
+            if (error) throw new Error(error.message)
+            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+              allProducts.push({
+                // Cast to number for type compat. Downstream we always String()
+                // before sending to Zuper, so the lossy cast is intentional.
+                product_id:        Number(String(r.product_key).replace(/\D/g, '')) || 0,
+                product_name:      r.product_name as string,
+                product_category:  (r.category_norm as string) ?? '',
+                manufacturer:      (r.brand_raw as string) ?? null,
+                manufacturer_norm: (r.brand_norm as string) ?? null,
+                product_description: (r.description_short as string) ?? null,
+                product_uom:       null,                 // QXO has per-variant UOM only
+                product_image_url: (r.product_image_url as string) ?? null,
+                suggested_price:   r.suggested_price as number | null,
+                purchase_price:    null,
+                proposal_line_item: r.proposal_line_item as string | null,
+                family_tier:       r.family_tier as string | null,
+              })
+            }
+          }
+          // QXO variants — map variant_sku → variant_code (as string), color → color_name.
+          for (let from = 0; from < keys.length; from += 500) {
+            const chunk = keys.slice(from, from + 500)
+            const { data, error } = await supabase
+              .from('qxo_variants')
+              .select('variant_sku, product_key, color, uom, image_url')
+              .in('product_key', chunk)
+            if (error) throw new Error(error.message)
+            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+              allVariants.push({
+                variant_id:        Number(r.variant_sku),
+                product_id:        Number(String(r.product_key).replace(/\D/g, '')) || 0,
+                variant_code:      String(r.variant_sku),
+                color_name:        (r.color as string) ?? null,
+                size_name:         (r.uom as string) ?? null,    // size column unused for QXO; carry UOM here for vendor catalog
+                variant_image_url: (r.image_url as string) ?? null,
+                is_restricted:     false,
+              })
+            }
+          }
         }
 
-        // ── Pricing fallback ──────────────────────────────────────────────────
-        // Only 5,646 / 19,807 products have a real `suggested_price`. The rest
-        // would upload as $0 and break proposal math. Build a median map by
-        // (category, family_tier) from the priced subset and pass it through —
-        // products without a price use the closest match; those still without
-        // a fallback land at 0 and are flagged via meta_data so CSMs can fix.
+        // ── Pricing fallback — built from the same catalog being uploaded ─
         const priceFallback: PriceFallback = { byCategoryTier: {}, byCategory: {} }
         try {
           const PAGE_PRICE = 1000
           const priced: { product_category: string; family_tier: string | null; suggested_price: number }[] = []
           let pfFrom = 0
           while (!streamClosed) {
-            const { data, error } = await supabase
-              .from('srs_products')
-              .select('product_category, family_tier, suggested_price')
-              .not('suggested_price', 'is', null)
-              .gt('suggested_price', 0)
-              .range(pfFrom, pfFrom + PAGE_PRICE - 1)
+            let q: any
+            if (cfg.source === 'srs') {
+              q = supabase.from('srs_products')
+                .select('product_category, family_tier, suggested_price')
+                .not('suggested_price', 'is', null)
+                .gt('suggested_price', 0)
+                .range(pfFrom, pfFrom + PAGE_PRICE - 1)
+            } else {
+              q = supabase.from('qxo_products')
+                .select('product_category:category_norm, family_tier, suggested_price')
+                .not('suggested_price', 'is', null)
+                .gt('suggested_price', 0)
+                .range(pfFrom, pfFrom + PAGE_PRICE - 1)
+            }
+            const { data, error } = await q
             if (error) break
             const rows = (data ?? []) as typeof priced
             priced.push(...rows)
@@ -115,7 +194,6 @@ export async function POST(req: NextRequest) {
           variantsByProduct.set(v.product_id, arr)
         }
 
-        // Build color→variant_code lookup: { product_id → { color_name → variant_code } }
         const variantCodeByColor = new Map<number, Map<string, string>>()
         for (const v of allVariants) {
           if (!v.variant_code || !v.color_name) continue
@@ -125,18 +203,12 @@ export async function POST(req: NextRequest) {
 
         let uploaded = 0
         let updated = 0
-        const errors: { productId: number; productName: string; message: string }[] = []
+        const errors: { productId: number | string; productName: string; message: string }[] = []
         const productIdMap: Record<string, string> = {}
-        // colorCatalogMap: srs_product_id → [{color_name, variant_code, option_uid, purchase_price}]
         const colorCatalogMap: Record<string, Array<{ color_name: string; variant_code: string; option_uid: string; purchase_price: number | null }>> = {}
         const batches = chunks(allProducts, 100)
 
-        // ── Idempotency: fetch existing Zuper products with their SRS product_id
-        // stamp so we can PUT-update them instead of POSTing duplicates on rerun.
-        // Cap at 250 pages (25k products) — guard against runaway loops on
-        // accounts that have unrelated products. Errors here are non-fatal:
-        // we fall back to POST-only mode and may create duplicates the operator
-        // must manually clean.
+        // ── Idempotency: fetch existing Zuper products + map by stamped product_id
         const existingByProductId = new Map<string, string>()
         try {
           let page = 1
@@ -156,13 +228,10 @@ export async function POST(req: NextRequest) {
           }
           emit({ type: 'idempotency_scan', existingCount: existingByProductId.size })
         } catch (e: unknown) {
-          // Non-fatal — fall back to POST-only
           emit({ type: 'idempotency_scan', existingCount: 0, warning: `Existing-product scan failed: ${(e as Error).message}. Re-uploads may create duplicates.` })
         }
 
         for (const [i, batch] of Array.from(batches.entries())) {
-          // Phase A — POST all products in the batch in parallel. Capture which
-          // ones need a follow-up GET to resolve option_uids (color-bearing products).
           const needGet: { srsId: number; zuperUid: string; product: SrsProduct }[] = []
 
           await Promise.allSettled(batch.map(async (product) => {
@@ -180,7 +249,6 @@ export async function POST(req: NextRequest) {
               const isUpdate = !!existingUid
               const url = isUpdate ? `${baseUrl}product/${existingUid}` : `${baseUrl}product`
               const method = isUpdate ? 'PUT' : 'POST'
-              // For PUT, include product_uid in the payload (Zuper convention).
               const finalPayload = isUpdate
                 ? { ...payload, product: { ...payload.product, product_uid: existingUid } }
                 : payload
@@ -203,11 +271,8 @@ export async function POST(req: NextRequest) {
                 })
 
                 if (zuperUid && hasColors) {
-                  // Defer the GET — process in Phase B with bounded concurrency
-                  // so we don't serialize ~100 GETs after the POST batch.
                   needGet.push({ srsId: product.product_id, zuperUid, product })
                 } else if (productVariants.some(v => v.variant_code)) {
-                  // No color options — store all variant codes for vendor catalog (no option mapping)
                   const variantEntries = productVariants
                     .filter(v => v.variant_code)
                     .map(v => ({
@@ -234,9 +299,6 @@ export async function POST(req: NextRequest) {
             }
           }))
 
-          // Phase B — fetch option_uids for color-bearing products in parallel
-          // (capped at OPTION_GET_CONCURRENCY). Failures are non-fatal: the product
-          // is already uploaded, only vendor-catalog option mapping is lost.
           if (needGet.length > 0 && !streamClosed) {
             await mapWithLimit(needGet, OPTION_GET_CONCURRENCY, async ({ srsId, zuperUid, product }) => {
               try {
@@ -263,7 +325,7 @@ export async function POST(req: NextRequest) {
           if (i < batches.length - 1) await sleep(3000)
         }
 
-        // ── Phase 2: Upload services ──────────────────────────────────────────
+        // ── Phase 2: Upload services (same for both catalogs) ─────────────────
         const servicesToUpload = SERVICE_CATALOG.filter(s =>
           s.trades.some(t => selectedTrades.includes(t)) &&
           serviceCategoryMap[s.category_key]

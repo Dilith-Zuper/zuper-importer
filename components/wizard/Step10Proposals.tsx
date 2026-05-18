@@ -66,6 +66,7 @@ export function Step10Proposals() {
     formulaMap, productIdMap, serviceIdMap,
     setStep, reset,
     baseUrl, apiKey,
+    catalogSource,
   } = useWizardStore()
 
   const [phase, setPhase] = useState<Phase>('preflight')
@@ -126,8 +127,21 @@ export function Step10Proposals() {
         selectedTrades,
         selectedGutterBrands, selectedGutterProductLines,
         selectedSidingBrands, selectedSidingProductLines,
+        catalogSource,
       }),
     }).then(r => r.json())
+
+    if (d.__unsupported === 'qxo') {
+      // QXO catalog: proposal-preview returns an explicit marker rather than
+      // an empty result so we can show a clear "templates not yet available"
+      // message instead of a confusing blank state.
+      setProposalPackages({})
+      setGutterProposalItems([])
+      setSidingProposalItems([])
+      setPhase('preview')
+      setPackageLoading(false)
+      return
+    }
 
     if (!d.error) {
       const gutters: ProposalLineItem[] = d.__gutters ?? []
@@ -389,8 +403,8 @@ export function Step10Proposals() {
         </>
       )}
 
-      <button onClick={() => setStep(9)} className="w-full text-sm text-gray-400 hover:text-gray-600 text-center transition-colors">
-        ← Back to Done
+      <button onClick={() => setStep(10)} className="w-full text-sm text-gray-400 hover:text-gray-600 text-center transition-colors">
+        ← Back to Vendor
       </button>
     </div>
   )

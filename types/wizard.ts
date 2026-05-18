@@ -1,7 +1,19 @@
 export type Trade = 'roofing' | 'gutters' | 'siding'
 
+export type CatalogSource = 'srs' | 'qxo'
+
+export interface QxoBranch {
+  branchNum: number
+  name: string
+  city: string | null
+  state: string | null
+  regionName: string | null
+  stockedSkuCount?: number
+}
+
 export interface ProposalLineItem {
-  product_id: number
+  // SRS uses integer product_id; QXO uses string product_key. Routes accept both.
+  product_id: number | string
   product_name: string
   proposal_line_item: string
   formula_key: string | null
@@ -21,7 +33,7 @@ export interface TokenInfo {
 }
 
 export interface UploadError {
-  productId: number
+  productId: number | string
   productName: string
   message: string
 }
@@ -40,26 +52,34 @@ export interface ColorCatalogEntry {
 }
 
 export interface WizardState {
-  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+  // Steps: 1 Connect · 2 Source · 3 Trades · 4 Brands · 5 Lines · 6 Preview ·
+  //        7 Validate · 8 Upload · 9 Done · 10 Vendor · 11 Templates
+  step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
   // Step 1 — Connect
   companyLoginName: string
   apiKey: string
   baseUrl: string
   companyName: string
-  // Step 2 — Trades
+  // Step 2 — Source (SRS / QXO + branch picker)
+  catalogSource: CatalogSource
+  selectedQxoBranch: QxoBranch | null
+  // Step 3 — Trades
   selectedTrades: Trade[]
-  // Step 3 — Brands (per trade)
+  // Step 4 — Brands (per trade)
   selectedBrands: string[]                         // roofing
   selectedGutterBrands: string[]
   selectedSidingBrands: string[]
-  // Step 4 — Product Lines (per trade)
+  // Step 5 — Product Lines (per trade)
   selectedProductLines: Record<string, string[]>   // roofing: { brand → lines }
   selectedGutterProductLines: Record<string, string[]>
   selectedSidingProductLines: Record<string, string[]>
-  // Step 5 — Preview
-  filteredProductIds: number[]
+  // Step 6 — Preview
+  // For QXO catalog, filteredProductIds holds string product_keys cast to
+  // numeric-looking strings; for SRS, integer product IDs. The upload route
+  // handles both shapes.
+  filteredProductIds: (number | string)[]
   productCounts: { total: number; byCategory: Record<string, number> }
-  // Step 6 — Validate
+  // Step 7 — Validate
   validationResults: ValidationResult[]
   categoryMap: Record<string, string>
   warehouseUid: string
@@ -67,12 +87,12 @@ export interface WizardState {
   formulaMap: Record<string, string>
   productTierFieldUid: string
   serviceCategoryMap: Record<string, string>  // category_key → zuper category_uid
-  // Step 7 — Upload
+  // Step 8 — Upload
   uploadSummary: { uploaded: number; skipped: number; errors: UploadError[] }
   productIdMap: Record<string, string>
   serviceIdMap: Record<string, string>          // service.id → zuper product_uid
-  colorCatalogMap: Record<string, ColorCatalogEntry[]>  // srs_product_id → per-color vendor entries
-  // Step 9 — Proposal Templates
+  colorCatalogMap: Record<string, ColorCatalogEntry[]>  // src product id/key → per-color vendor entries
+  // Step 11 — Proposal Templates
   proposalPackages: Record<string, BrandPackage>
   gutterProposalItems: ProposalLineItem[]
   sidingProposalItems: ProposalLineItem[]

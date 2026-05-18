@@ -1,9 +1,43 @@
 import { NextRequest } from 'next/server'
 import { fetchWithRetry, zuperHeaders } from '@/lib/zuper-fetch'
-import type { ColorCatalogEntry } from '@/types/wizard'
+import type { ColorCatalogEntry, CatalogSource } from '@/types/wizard'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+// QXO uses a different vendor record. The billing address is the QXO HQ
+// (Greenwich, CT) and the display name swaps so CSMs see the right vendor in
+// Zuper. All other vendor fields are placeholders the CSM can refine.
+const QXO_VENDOR = {
+  vendor_name:         'QXO Inc',
+  vendor_display_name: 'QXO Inc',
+  vendor_contact_name: 'QXO',
+  vendor_email:        'qxo@email.com',
+  tax_identifier:      null,
+  vendor_lead_time:    null,
+  vendor_description:  '',
+  vendor_contact_no:   { work: '2032219690', mobile: '2032219690' },
+  vendor_delivery_method: 'JOB_ADDRESS',
+  vendor_address: {
+    street: '', city: '', country: '', email: 'qxo@email.com',
+    phone_number: '2032219690', zip_code: '', state: '',
+    geo_cordinates: [0, 0], landmark: '',
+  },
+  vendor_billing_address: {
+    street:       '5 American Lane',
+    city:         'Greenwich',
+    state:        'Connecticut',
+    country:      'United States',
+    zip_code:     '06831',
+    email:        'qxo@email.com',
+    phone_number: '2032219690',
+    geo_cordinates: [41.0454, -73.6376],
+    landmark:     '',
+  },
+  attachments:       [],
+  custom_fields:     [],
+  vendor_bank_details: null,
+}
 
 const SRS_VENDOR = {
   vendor_name:         'SRS Distribution Inc',
@@ -41,12 +75,16 @@ export async function POST(req: NextRequest) {
     baseUrl, apiKey,
     productIdMap,
     colorCatalogMap,
+    catalogSource = 'srs',
   }: {
     baseUrl: string
     apiKey: string
     productIdMap: Record<string, string>
     colorCatalogMap: Record<string, ColorCatalogEntry[]>
+    catalogSource?: CatalogSource
   } = await req.json()
+
+  const VENDOR_RECORD = catalogSource === 'qxo' ? QXO_VENDOR : SRS_VENDOR
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -67,11 +105,11 @@ export async function POST(req: NextRequest) {
         ) ?? terms[0]
         const paymentTermUid = immediateTerm?.payment_term_uid ?? null
 
-        // ── Step 2: Look up existing SRS vendor by name (paginated) ─────────
+        // ── Step 2: Look up existing vendor by name (paginated) ─────────────
         // If found, we POST new catalog entries to /vendors/{uid}/catalog
         // instead of POSTing a duplicate vendor (which Zuper rejects).
-        emit({ type: 'status', message: 'Checking for existing SRS vendor…' })
-        const wantedName = SRS_VENDOR.vendor_name.trim().toLowerCase()
+        emit({ type: 'status', message: `Checking for existing ${VENDOR_RECORD.vendor_name} vendor…` })
+        const wantedName = VENDOR_RECORD.vendor_name.trim().toLowerCase()
         let existingVendorUid = ''
         for (let page = 1; page < 100; page++) {
           const r = await fetchWithRetry(`${baseUrl}vendors?count=100&page=${page}`, {
@@ -152,7 +190,7 @@ export async function POST(req: NextRequest) {
             headers: zuperHeaders(apiKey),
             body: JSON.stringify({
               vendor: {
-                ...SRS_VENDOR,
+                ...VENDOR_RECORD,
                 accounts: { payment_term: paymentTermUid, tax_group: null },
               },
               vendor_catalog: newEntries,

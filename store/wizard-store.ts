@@ -1,11 +1,13 @@
 'use client'
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry } from '@/types/wizard'
+import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry, CatalogSource, QxoBranch } from '@/types/wizard'
 
 interface WizardStore extends WizardState {
   setStep: (step: WizardState['step']) => void
   setConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
+  setCatalogSource: (source: CatalogSource) => void
+  setSelectedQxoBranch: (branch: QxoBranch | null) => void
   setSelectedTrades: (trades: Trade[]) => void
   setSelectedBrands: (brands: string[]) => void
   setSelectedGutterBrands: (brands: string[]) => void
@@ -13,7 +15,7 @@ interface WizardStore extends WizardState {
   setSelectedProductLines: (lines: Record<string, string[]>) => void
   setSelectedGutterProductLines: (lines: Record<string, string[]>) => void
   setSelectedSidingProductLines: (lines: Record<string, string[]>) => void
-  setPreview: (ids: number[], counts: WizardState['productCounts']) => void
+  setPreview: (ids: (number | string)[], counts: WizardState['productCounts']) => void
   setValidationResult: (result: ValidationResult) => void
   setValidationData: (data: {
     categoryMap: Record<string, string>
@@ -36,6 +38,8 @@ const initialState: WizardState = {
   apiKey: '',
   baseUrl: '',
   companyName: '',
+  catalogSource: 'srs',
+  selectedQxoBranch: null,
   selectedTrades: ['roofing'],
   selectedBrands: [],
   selectedGutterBrands: [],
@@ -69,6 +73,37 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   setConnection: (companyLoginName, apiKey, baseUrl, companyName) =>
     set({ companyLoginName, apiKey, baseUrl, companyName, step: 2 }),
 
+  // Changing the catalog source clears every downstream selection — different
+  // sources have totally different brand lists, product lines, and
+  // accessory catalogs, so cross-contamination would silently produce wrong
+  // uploads. Branch also resets because it's QXO-specific.
+  setCatalogSource: (source) => set((s) => ({
+    catalogSource: source,
+    selectedQxoBranch: source === 'srs' ? null : s.selectedQxoBranch,
+    selectedBrands: [],
+    selectedGutterBrands: [],
+    selectedSidingBrands: [],
+    selectedProductLines: {},
+    selectedGutterProductLines: {},
+    selectedSidingProductLines: {},
+    filteredProductIds: [],
+    productCounts: { total: 0, byCategory: {} },
+  })),
+
+  // Same reasoning — switching branch on QXO changes the eligible product set,
+  // so cached brand/line selections must be cleared.
+  setSelectedQxoBranch: (branch) => set({
+    selectedQxoBranch: branch,
+    selectedBrands: [],
+    selectedGutterBrands: [],
+    selectedSidingBrands: [],
+    selectedProductLines: {},
+    selectedGutterProductLines: {},
+    selectedSidingProductLines: {},
+    filteredProductIds: [],
+    productCounts: { total: 0, byCategory: {} },
+  }),
+
   setSelectedTrades: (trades) => set({ selectedTrades: trades }),
 
   setSelectedBrands: (brands) => set({ selectedBrands: brands }),
@@ -80,7 +115,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   setSelectedSidingProductLines: (lines) => set({ selectedSidingProductLines: lines }),
 
   setPreview: (ids, counts) =>
-    set({ filteredProductIds: ids, productCounts: counts, step: 6 }),
+    set({ filteredProductIds: ids, productCounts: counts, step: 7 }),
 
   setValidationResult: (result) =>
     set((s) => ({
@@ -93,7 +128,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   setValidationData: (data) => set({ ...data, serviceCategoryMap: data.serviceCategoryMap ?? {} }),
 
   setUploadSummary: ({ productIdMap, serviceIdMap, colorCatalogMap, ...summary }) =>
-    set({ uploadSummary: summary, productIdMap, serviceIdMap, colorCatalogMap, step: 8 }),
+    set({ uploadSummary: summary, productIdMap, serviceIdMap, colorCatalogMap, step: 9 }),
 
   setProposalPackages: (packages) => set({ proposalPackages: packages }),
   setGutterProposalItems: (items) => set({ gutterProposalItems: items }),

@@ -10,10 +10,11 @@ export function Step6Upload() {
     apiKey, baseUrl, filteredProductIds, categoryMap, warehouseUid, formulaMap, productTierFieldUid,
     selectedTrades, serviceCategoryMap,
     companyName, setUploadSummary,
+    catalogSource,
   } = useWizardStore()
 
   const [uploaded, setUploaded]       = useState(0)
-  const [errors, setErrors]           = useState<{ productId: number; productName: string; message: string }[]>([])
+  const [errors, setErrors]           = useState<{ productId: number | string; productName: string; message: string }[]>([])
   const [log, setLog]                 = useState<LogEntry[]>([])
   const [done, setDone]               = useState(false)
   const [batchInfo, setBatchInfo]     = useState({ current: 0, total: 0 })
@@ -41,6 +42,7 @@ export function Step6Upload() {
             productIds: filteredProductIds,
             categoryMap, warehouseUid, formulaMap, productTierFieldUid,
             selectedTrades, serviceCategoryMap,
+            catalogSource,
           }),
         })
 

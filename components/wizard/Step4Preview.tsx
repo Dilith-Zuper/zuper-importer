@@ -58,7 +58,7 @@ function sortGroups(entries: [string, Product[]][]): [string, Product[]][] {
 }
 
 interface Product {
-  product_id: number
+  product_id: number | string
   product_name: string
   product_category: string
   manufacturer_norm: string | null
@@ -73,6 +73,7 @@ export function Step4Preview() {
     selectedTrades,
     selectedGutterBrands, selectedGutterProductLines,
     selectedSidingBrands, selectedSidingProductLines,
+    catalogSource, selectedQxoBranch,
   } = useWizardStore()
   const [products, setProducts] = useState<Product[]>([])
   const [counts, setCounts] = useState<{ total: number; byCategory: Record<string, number> }>({ total: 0, byCategory: {} })
@@ -89,6 +90,7 @@ export function Step4Preview() {
         selectedTrades,
         selectedGutterBrands, selectedGutterProductLines,
         selectedSidingBrands, selectedSidingProductLines,
+        catalogSource, branchNum: selectedQxoBranch?.branchNum,
       }),
     }).then(r => r.json()).then(d => {
       setProducts(d.products ?? [])
@@ -215,11 +217,11 @@ export function Step4Preview() {
       </button>
 
       <div className="flex items-center justify-center gap-4 text-sm text-gray-400">
-        <button onClick={() => setStep(4)} className="hover:text-gray-600 transition-colors">
+        <button onClick={() => setStep(5)} className="hover:text-gray-600 transition-colors">
           ← Back to product lines
         </button>
         <span className="text-gray-300">·</span>
-        <button onClick={() => setStep(3)} className="hover:text-gray-600 transition-colors">
+        <button onClick={() => setStep(4)} className="hover:text-gray-600 transition-colors">
           ← Back to brand selection
         </button>
       </div>

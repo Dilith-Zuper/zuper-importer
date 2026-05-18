@@ -167,7 +167,9 @@ export function Step4ProductLines() {
     companyName,
     setSelectedProductLines, setSelectedGutterProductLines, setSelectedSidingProductLines,
     setStep,
+    catalogSource, selectedQxoBranch,
   } = useWizardStore()
+  const srcArgs = { catalogSource, branchNum: selectedQxoBranch?.branchNum }
 
   const [activeTab, setActiveTab] = useState<Trade>(selectedTrades[0] ?? 'roofing')
   const [brandLines, setBrandLines]       = useState<Record<string, LineItem[]>>({})
@@ -196,13 +198,13 @@ export function Step4ProductLines() {
 
     const fetches: Promise<void>[] = []
     if (selectedTrades.includes('roofing') && selectedBrands.length) {
-      fetches.push(getProductLines(selectedBrands, 'roofing').then((d: any) => applyLines(d, setBrandLines, setRoofSelected, false)))
+      fetches.push(getProductLines(selectedBrands, 'roofing', srcArgs).then((d: any) => applyLines(d, setBrandLines, setRoofSelected, false)))
     }
     if (selectedTrades.includes('gutters') && selectedGutterBrands.length) {
-      fetches.push(getProductLines(selectedGutterBrands, 'gutters').then((d: any) => applyLines(d, setGutterLines, setGutterSel, true)))
+      fetches.push(getProductLines(selectedGutterBrands, 'gutters', srcArgs).then((d: any) => applyLines(d, setGutterLines, setGutterSel, true)))
     }
     if (selectedTrades.includes('siding') && selectedSidingBrands.length) {
-      fetches.push(getProductLines(selectedSidingBrands, 'siding').then((d: any) => applyLines(d, setSidingLines, setSidingSel, true)))
+      fetches.push(getProductLines(selectedSidingBrands, 'siding', srcArgs).then((d: any) => applyLines(d, setSidingLines, setSidingSel, true)))
     }
     Promise.all(fetches)
       .then(() => setLoading(false))
@@ -242,7 +244,7 @@ export function Step4ProductLines() {
     if (selectedTrades.includes('roofing')) setSelectedProductLines(toRecord(roofSelected))
     if (selectedTrades.includes('gutters')) setSelectedGutterProductLines(toRecord(gutterSel))
     if (selectedTrades.includes('siding'))  setSelectedSidingProductLines(toRecord(sidingSel))
-    setStep(5)
+    setStep(6)
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" /></div>
@@ -313,7 +315,7 @@ export function Step4ProductLines() {
         className="w-full h-12 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold rounded-full transition-colors text-base">
         Continue with {totalSelected.toLocaleString()} products →
       </button>
-      <button onClick={() => setStep(3)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
+      <button onClick={() => setStep(4)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
         ← Back to brand selection
       </button>
     </div>
