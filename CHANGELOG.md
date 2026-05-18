@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-05-18
+
 ### Fixed
 - Step 9 vendor creation no longer fails when an SRS vendor already exists. The route now looks up the vendor by name first; if found, it reads the existing catalog and POSTs only the new entries to `/vendors/{uid}/catalog`. Supports the workflow of importing roofing first then siding/gutters separately without touching the existing proposal templates.
 - Top-level catch in `app/api/create-vendor/route.ts` now mirrors the validate route's pattern — logs to Vercel function logs via `console.error` and defensively wraps emit/close calls.
