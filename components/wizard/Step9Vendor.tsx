@@ -15,7 +15,10 @@ export function Step9Vendor() {
   const [phase, setPhase]           = useState<Phase>('preview')
   const [statusMsg, setStatusMsg]   = useState('')
   const [catalogEntries, setCatalogEntries] = useState(0)
+  const [skippedEntries, setSkippedEntries] = useState(0)
   const [vendorUid, setVendorUid]   = useState('')
+  const [wasCreated, setWasCreated] = useState(true)
+  const [doneMessage, setDoneMessage] = useState('')
   const [errorMsg, setErrorMsg]     = useState('')
   const startedRef = useRef(false)
 
@@ -61,6 +64,9 @@ export function Step9Vendor() {
           if (data.type === 'done') {
             setVendorUid(data.vendorUid ?? '')
             setCatalogEntries(data.catalogEntries ?? 0)
+            setSkippedEntries(data.skipped ?? 0)
+            setWasCreated(data.created !== false) // default true for back-compat
+            setDoneMessage(data.message ?? '')
             setPhase('done')
           }
           if (data.type === 'error') {
@@ -135,7 +141,13 @@ export function Step9Vendor() {
       {/* Done state */}
       {phase === 'done' && (
         <div className="bg-green-50 border border-green-200 rounded-2xl px-5 py-4 text-sm text-green-700 font-semibold text-center">
-          Vendor created — {catalogEntries.toLocaleString()} catalog entries uploaded
+          {wasCreated
+            ? <>Vendor created — {catalogEntries.toLocaleString()} catalog entries uploaded</>
+            : catalogEntries > 0
+              ? <>Vendor already existed — added {catalogEntries.toLocaleString()} new catalog entries{skippedEntries > 0 && <> ({skippedEntries.toLocaleString()} already present)</>}</>
+              : <>Vendor already existed — {skippedEntries.toLocaleString()} products already in catalog, nothing to add</>
+          }
+          {doneMessage && <span className="block text-xs font-normal text-green-600 mt-1">{doneMessage}</span>}
           {vendorUid && <span className="block text-xs font-normal text-green-600 mt-1">Vendor UID: {vendorUid}</span>}
         </div>
       )}
