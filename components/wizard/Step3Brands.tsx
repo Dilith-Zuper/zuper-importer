@@ -28,10 +28,16 @@ function brandMatches(query: string, name: string): boolean {
 
 // ── Simple brand list for gutters / siding ──────────────────────────────────
 function SimpleBrandList({
-  brands, selected, onToggle,
-}: { brands: BrandItem[]; selected: Set<string>; onToggle: (name: string) => void }) {
+  brands, selected, onToggle, onSetAll,
+}: {
+  brands: BrandItem[]
+  selected: Set<string>
+  onToggle: (name: string) => void
+  onSetAll: (shouldSelect: boolean) => void
+}) {
   const [search, setSearch] = useState('')
   const filtered = brands.filter(b => brandMatches(search, b.name))
+  const allSelected = brands.length > 0 && brands.every(b => selected.has(b.name))
 
   return (
     <div className="space-y-3">
@@ -54,9 +60,17 @@ function SimpleBrandList({
         ))}
         {filtered.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No brands found</p>}
       </div>
-      {selected.size > 0 && (
-        <p className="text-xs text-orange-500 font-medium">{selected.size} brand{selected.size !== 1 ? 's' : ''} selected</p>
-      )}
+      <div className="flex items-center justify-between">
+        {selected.size > 0 ? (
+          <p className="text-xs text-orange-500 font-medium">{selected.size} brand{selected.size !== 1 ? 's' : ''} selected</p>
+        ) : <span />}
+        {brands.length > 0 && (
+          <button type="button" onClick={() => onSetAll(!allSelected)}
+            className="text-xs font-semibold text-orange-500 hover:text-orange-600 transition-colors">
+            {allSelected ? 'Deselect all' : `Select all ${brands.length} brands`}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -146,6 +160,11 @@ export function Step3Brands() {
   const toggleRoofing = (name: string) => setRoofingSelected(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
   const toggleGutter  = (name: string) => setGutterSelected(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
   const toggleSiding  = (name: string) => setSidingSelected(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  const setAllGutters = (select: boolean) =>
+    setGutterSelected(select ? new Set(gutterBrands.map(b => b.name)) : new Set())
+  const setAllSiding = (select: boolean) =>
+    setSidingSelected(select ? new Set(sidingBrands.map(b => b.name)) : new Set())
 
   const canContinue =
     (!selectedTrades.includes('roofing') || roofingSelected.size > 0) &&
@@ -241,7 +260,7 @@ export function Step3Brands() {
       {(activeTab === 'gutters' || selectedTrades.length === 1 && selectedTrades[0] === 'gutters') && selectedTrades.includes('gutters') && (
         <div className="space-y-2">
           <p className="text-sm text-gray-500">Select the gutter brands you stock. Universal accessories (Manufacturer Varies) are always included.</p>
-          <SimpleBrandList brands={gutterBrands} selected={gutterSelected} onToggle={toggleGutter} />
+          <SimpleBrandList brands={gutterBrands} selected={gutterSelected} onToggle={toggleGutter} onSetAll={setAllGutters} />
         </div>
       )}
 
@@ -249,7 +268,7 @@ export function Step3Brands() {
       {(activeTab === 'siding' || selectedTrades.length === 1 && selectedTrades[0] === 'siding') && selectedTrades.includes('siding') && (
         <div className="space-y-2">
           <p className="text-sm text-gray-500">Select the siding brands you stock.</p>
-          <SimpleBrandList brands={sidingBrands} selected={sidingSelected} onToggle={toggleSiding} />
+          <SimpleBrandList brands={sidingBrands} selected={sidingSelected} onToggle={toggleSiding} onSetAll={setAllSiding} />
         </div>
       )}
 

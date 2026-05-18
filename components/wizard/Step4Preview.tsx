@@ -214,9 +214,15 @@ export function Step4Preview() {
         Confirm &amp; Run Pre-flight Checks →
       </button>
 
-      <button onClick={() => setStep(4)} className="w-full text-sm text-gray-400 hover:text-gray-600 transition-colors text-center">
-        ← Back to brand selection
-      </button>
+      <div className="flex items-center justify-center gap-4 text-sm text-gray-400">
+        <button onClick={() => setStep(4)} className="hover:text-gray-600 transition-colors">
+          ← Back to product lines
+        </button>
+        <span className="text-gray-300">·</span>
+        <button onClick={() => setStep(3)} className="hover:text-gray-600 transition-colors">
+          ← Back to brand selection
+        </button>
+      </div>
     </div>
   )
 }
