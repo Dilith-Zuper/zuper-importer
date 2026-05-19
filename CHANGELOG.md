@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-05-19
+
+### Fixed
+- `lib/supabase.ts` no longer throws at module load when env vars are missing. Vercel Preview deploys scope env vars separately from Production; without `SUPABASE_URL` in Preview, Next 14's "Collecting page data" phase crashed with `Failed to collect page data for /api/brands` even though the code was fine. The module now uses placeholder values during build and logs a clear warning at production startup if env vars are still missing — builds are decoupled from runtime Supabase config.
+
 ## [v0.5.0] - 2026-05-18
 
 ### Added
