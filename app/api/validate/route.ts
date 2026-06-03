@@ -67,9 +67,15 @@ export async function POST(req: NextRequest) {
           }
           const { data, error: pErr } = await q
           if (pErr) throw new Error(`Supabase fetch (${slice.length} ids): ${pErr.message}`)
+          let sawNullCategory = false
           for (const row of (data ?? []) as { product_category: string | null }[]) {
             if (row.product_category) categorySet.add(row.product_category)
+            else sawNullCategory = true
           }
+          // Products with no normalized category are mapped to "OTHER" at upload
+          // time (see app/api/upload/route.ts ABC branch). Make sure the Zuper
+          // category exists so categoryMap['OTHER'] resolves.
+          if (sawNullCategory || cfg.source !== 'srs') categorySet.add('OTHER')
         }
         const requiredCategories = Array.from(categorySet)
 

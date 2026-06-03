@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- ABC Big 3 detection no longer leaks non-Big3 brands (Carlisle, BiTec, Westlake Royal, etc.) into the auto-selected tile row on Step 3. ABC's materialized view aggregates `is_big3_brand` via `BOOL_OR` over all items in a family, so a Carlisle family with even one Big-3-flagged item would mark the whole family `is_big3_brand=true` while `MIN(manufacturer_norm)` returned "Carlisle" as the display name. `app/api/brands/route.ts` now uses the canonical `QXO_BIG3` set (Gaf / Certainteed / Owens Corning) for ABC, same as QXO; only SRS uses the column lookup.
+- ABC products with empty `family_name` no longer fail upload with "Product Name is Mandatory". `app/api/upload/route.ts` now filters them out before the upload loop and reports the count via a `{type:'skip'}` SSE event, tallied into `uploadSummary.skipped`. The empty-name rows are catalog-data noise from the ABC API ingest — they were never real products.
+- ABC products in unmapped raw categories (insulation, ceiling panels, acoustic batt, etc.) no longer fail with "Product Category is Mandatory". `app/api/upload/route.ts` coalesces a null/empty `product_category` to `'OTHER'`, and `app/api/validate/route.ts` always seeds an `OTHER` Zuper category for QXO + ABC uploads so `categoryMap['OTHER']` resolves before the upload starts. v1.1 follow-up: expand `enrich-abc-category-norm.py`'s `CATEGORY_MAP` so these products land in semantic categories instead of "Other".
+- Error CSV download on Step 7 Done now works in Safari + Firefox. `components/wizard/Step7Done.tsx` appends the anchor to the DOM before `.click()`, sanitizes empty product names to `(unnamed product)`, strips newlines from messages, prepends a UTF-8 BOM so Excel renders em-dashes correctly, and wraps the whole flow in a try/catch with `console.error` so any future failure surfaces in DevTools instead of silently doing nothing.
+- Step 9 vendor preview is now source-aware. `components/wizard/Step9Vendor.tsx` reads the catalog source from the wizard store and renders the matching vendor name + phone + address (SRS Distribution Inc / QXO Inc / ABC Supply Co Inc). The actual vendor creation was already source-correct via `app/api/create-vendor/route.ts` — only the preview card was hardcoded to SRS.
+
 ### Added
 - **ABC Supply** as a third catalog source alongside SRS and QXO.
   - **Step 2 Source** now offers ABC Supply (34,868 family-grouped products from a 316K-SKU raw catalog). Branch-agnostic in v1 — all products available regardless of location.

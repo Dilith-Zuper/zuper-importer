@@ -2,8 +2,18 @@
 import { useState, useRef } from 'react'
 import { useWizardStore } from '@/store/wizard-store'
 import { ProgressBar } from '@/components/ui/ProgressBar'
+import type { CatalogSource } from '@/types/wizard'
 
 type Phase = 'preview' | 'creating' | 'done' | 'error'
+
+// Mirror of the vendor records POSTed by app/api/create-vendor/route.ts.
+// Keep these in sync with that file — the API record is the source of truth
+// for what actually lands in Zuper; this map is just for the preview card.
+const VENDOR_PREVIEW: Record<CatalogSource, { name: string; phone: string; address: string }> = {
+  srs: { name: 'SRS Distribution Inc', phone: '214-491-4149', address: '7440 State Hwy 121, McKinney TX 75070' },
+  qxo: { name: 'QXO Inc',              phone: '203-221-9690', address: '5 American Lane, Greenwich CT 06831'   },
+  abc: { name: 'ABC Supply Co Inc',    phone: '608-364-1500', address: '1 ABC Parkway, Beloit WI 53511'        },
+}
 
 export function Step9Vendor() {
   const {
@@ -89,7 +99,7 @@ export function Step9Vendor() {
           {phase === 'done' ? 'Vendor catalog created' : 'Create Vendor Catalog'}
         </h2>
         <p className="text-gray-500 mt-1">
-          SRS Distribution Inc → <span className="font-medium text-orange-500">{companyName}</span>
+          {VENDOR_PREVIEW[catalogSource].name} → <span className="font-medium text-orange-500">{companyName}</span>
         </p>
       </div>
 
@@ -99,15 +109,15 @@ export function Step9Vendor() {
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-xs text-gray-400 font-medium">Name</p>
-            <p className="font-semibold text-gray-800">SRS Distribution Inc</p>
+            <p className="font-semibold text-gray-800">{VENDOR_PREVIEW[catalogSource].name}</p>
           </div>
           <div>
             <p className="text-xs text-gray-400 font-medium">Phone</p>
-            <p className="font-semibold text-gray-800">214-491-4149</p>
+            <p className="font-semibold text-gray-800">{VENDOR_PREVIEW[catalogSource].phone}</p>
           </div>
           <div>
             <p className="text-xs text-gray-400 font-medium">Billing Address</p>
-            <p className="font-semibold text-gray-800">7440 State Hwy 121, McKinney TX 75070</p>
+            <p className="font-semibold text-gray-800">{VENDOR_PREVIEW[catalogSource].address}</p>
           </div>
           <div>
             <p className="text-xs text-gray-400 font-medium">Payment Term</p>

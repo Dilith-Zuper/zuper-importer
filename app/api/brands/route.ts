@@ -134,15 +134,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Roofing — group into big3 / topSecondary / otherBrands
+    //
+    // For ABC and QXO we use the canonical Big 3 set, not a column lookup.
+    // ABC's materialized view aggregates is_big3_brand via BOOL_OR over all
+    // items in a family — if even one item has the flag, the whole family is
+    // marked Big 3. Combined with MIN(manufacturer_norm) for the brand name,
+    // a family with mixed-supplier items can show up under e.g. "Carlisle"
+    // while still flagged is_big3_brand=true. Hardcoding the canonical set
+    // matches the QXO approach and avoids the aggregation skew.
     const isBig3 = (name: string) =>
-      cfg.source !== 'qxo'
-        ? false  // SRS + ABC use is_big3_brand column lookup below
+      cfg.source === 'srs'
+        ? false  // SRS uses the is_big3_brand column lookup below
         : QXO_BIG3.has(name)
 
-    // For SRS + ABC, fetch is_big3_brand to identify the Big 3 — separate query
-    // because the count-grouping pass doesn't include other columns.
     let big3Names = new Set<string>()
-    if (cfg.source !== 'qxo') {
+    if (cfg.source === 'srs') {
       const { data, error } = await supabase
         .from(cfg.tables.products)
         .select(cfg.cols.brand)

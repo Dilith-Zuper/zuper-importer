@@ -113,8 +113,10 @@ export async function POST(req: NextRequest) {
               const rawId = String(r.product_id)
               allProducts.push({
                 product_id:          toNum(rawId),
-                product_name:        r.product_name as string,
-                product_category:    (r.product_category as string) ?? '',
+                product_name:        (r.product_name as string | null) ?? '',
+                // Null/empty ABC product_category routes to "OTHER" — validate
+                // creates the Zuper category, categoryMap['OTHER'] resolves.
+                product_category:    ((r.product_category as string) || 'OTHER'),
                 manufacturer:        (r.manufacturer_norm as string) ?? null,
                 manufacturer_norm:   (r.manufacturer_norm as string) ?? null,
                 product_description: (r.product_description as string) ?? null,
@@ -197,6 +199,18 @@ export async function POST(req: NextRequest) {
               })
             }
           }
+        }
+
+        // ── Filter out products with no usable name (incomplete ingest noise) ─
+        // These show up as ": Product Name is Mandatory" failures in Zuper. We
+        // count them toward `skipped` so CSMs see the number and don't think
+        // products silently vanished.
+        const skippedNoName = allProducts.filter(p => !p.product_name?.trim()).length
+        if (skippedNoName > 0) {
+          const usable = allProducts.filter(p => p.product_name?.trim())
+          allProducts.length = 0
+          allProducts.push(...usable)
+          emit({ type: 'skip', count: skippedNoName, reason: 'empty product_name' })
         }
 
         // ── Pricing fallback — built from the same catalog being uploaded ─
@@ -428,7 +442,7 @@ export async function POST(req: NextRequest) {
           }))
         }
 
-        emit({ type: 'done', uploaded, updated, skipped: 0, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
+        emit({ type: 'done', uploaded, updated, skipped: skippedNoName, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, uploaded: 0, updated: 0, skipped: 0, errors: [] })

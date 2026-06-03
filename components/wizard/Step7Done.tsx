@@ -6,12 +6,30 @@ export function Step7Done() {
   const { uploaded, skipped, errors } = uploadSummary
 
   function downloadErrors() {
-    const csv = ['Product Name,Error', ...errors.map(e => `"${e.productName.replace(/"/g, '""')}","${e.message.replace(/"/g, '""')}"`)]
-      .join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'upload-errors.csv'; a.click()
-    URL.revokeObjectURL(url)
+    try {
+      // BOM tells Excel the file is UTF-8 — without it, em-dashes in ABC product
+      // names render as garbled bytes when CSMs open the CSV in Excel.
+      const BOM = '﻿'
+      const csv = BOM + ['Product Name,Error', ...errors.map(e => {
+        const name = (e.productName ?? '').trim() || '(unnamed product)'
+        const message = (e.message ?? '').replace(/[\r\n]+/g, ' ')
+        return `"${name.replace(/"/g, '""')}","${message.replace(/"/g, '""')}"`
+      })].join('\n')
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'upload-errors.csv'
+      // Safari + some Chromium variants require the anchor to be in the DOM
+      // before .click() will actually trigger a download.
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('CSV download failed:', e)
+    }
   }
 
   return (
