@@ -2,7 +2,7 @@
 import { useWizardStore } from '@/store/wizard-store'
 
 export function Step7Done() {
-  const { companyName, uploadSummary, selectedBrands, reset, setStep } = useWizardStore()
+  const { companyName, uploadSummary, selectedBrands, reset, setStep, catalogSource } = useWizardStore()
   const { uploaded, skipped, errors } = uploadSummary
 
   function downloadErrors() {
@@ -87,12 +87,14 @@ export function Step7Done() {
       >
         Upload Vendor Catalog →
       </button>
-      <button
-        onClick={() => setStep(11)}
-        className="w-full h-11 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-sm"
-      >
-        Skip to Proposal Templates →
-      </button>
+      {catalogSource === 'srs' && (
+        <button
+          onClick={() => setStep(11)}
+          className="w-full h-11 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-sm"
+        >
+          Skip to Proposal Templates →
+        </button>
+      )}
       <button
         onClick={reset}
         className="w-full h-12 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-base"

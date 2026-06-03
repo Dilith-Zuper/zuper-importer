@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Changed
+- **Step 11 (proposal templates) hidden upfront for ABC + QXO.** The SRS proposal engine relies on `primary_item` ordering and brand-specific tier-upgrade rules that don't apply to ABC's family-id-keyed schema or QXO's branch-scoped catalog, so the route already bailed with `__unsupported`. The wizard now also hides the step from the 11-circle progress indicator (becomes 10), drops the "Skip to Proposal Templates" button on Step 7 Done, and replaces the "Build Proposal Templates →" CTA on Step 9 Vendor with "Start New Import" for ABC/QXO. SRS flow unchanged. Defense in depth retained: deep-linking to `step === 11` with ABC selected still renders the existing `__unsupported` notice.
 - **Upload route Phase 1 sped up by ~60-70%** for accounts with prior products and uploads in the 2K+ product range. Three pacing changes in `app/api/upload/route.ts`:
   1. **Parallel idempotency scan** — the pre-upload "fetch all existing Zuper products" scan now fans out at concurrency 8 (was sequential, 1 page at a time). For an account saturated with prior test products, this collapses ~80s of serial waiting into ~10s. Emits `{type:'idempotency_scan_progress', pageNumber, totalPages}` events.
   2. **Inter-batch pause reduced from 3000ms → 500ms** via a new `BATCH_PAUSE_MS` constant. For a 20-batch upload that saves 50 seconds of pure idle time. `fetchWithRetry` already handles 429 backoff per-request, so the conservative global sleep was just dead weight.

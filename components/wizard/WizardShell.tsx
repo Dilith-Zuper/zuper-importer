@@ -30,7 +30,11 @@ const STEPS = [
 ]
 
 export function WizardShell() {
-  const { step } = useWizardStore()
+  const { step, catalogSource } = useWizardStore()
+  // Proposal templates (step 11) are SRS-only — the engine uses primary_item
+  // ordering and brand-specific tier-upgrade rules that don't apply to ABC/QXO.
+  // Hide the "Templates" circle + adjust the "Step X of N" badge for those.
+  const visibleSteps = catalogSource === 'srs' ? STEPS : STEPS.slice(0, 10)
   const [toastReason, setToastReason] = useState<string | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const logoClickCount = useRef(0)
@@ -66,7 +70,7 @@ export function WizardShell() {
               Do you have any doubts? Ask here
             </button>
             <span className="bg-orange-50 text-orange-600 text-xs font-semibold px-3 py-1.5 rounded-full">
-              Step {step} of {STEPS.length}
+              Step {step} of {visibleSteps.length}
             </span>
           </div>
         </div>
@@ -76,7 +80,7 @@ export function WizardShell() {
       <div className="bg-white border-b border-[#E5E2DC]">
         <div className="max-w-[760px] mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            {STEPS.map((s, i) => {
+            {visibleSteps.map((s, i) => {
               const n = i + 1
               const done   = step > n
               const active = step === n
@@ -99,7 +103,7 @@ export function WizardShell() {
                       {s.short}
                     </span>
                   </div>
-                  {i < STEPS.length - 1 && (
+                  {i < visibleSteps.length - 1 && (
                     <div className={`flex-1 h-px mx-2 ${done ? 'bg-orange-400' : 'bg-gray-200'}`} />
                   )}
                 </div>
