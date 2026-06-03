@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Upload route Phase 1 sped up by ~60-70%** for accounts with prior products and uploads in the 2K+ product range. Three pacing changes in `app/api/upload/route.ts`:
+  1. **Parallel idempotency scan** — the pre-upload "fetch all existing Zuper products" scan now fans out at concurrency 8 (was sequential, 1 page at a time). For an account saturated with prior test products, this collapses ~80s of serial waiting into ~10s. Emits `{type:'idempotency_scan_progress', pageNumber, totalPages}` events.
+  2. **Inter-batch pause reduced from 3000ms → 500ms** via a new `BATCH_PAUSE_MS` constant. For a 20-batch upload that saves 50 seconds of pure idle time. `fetchWithRetry` already handles 429 backoff per-request, so the conservative global sleep was just dead weight.
+  3. **Color option GETs deferred** to a single end-of-Phase-1 pass at concurrency 15 (was per-batch at concurrency 10, blocking the next batch). Stops shingle-heavy batches from stalling subsequent ones. Emits `{type:'color_gets_start', count}` when the pass begins.
+- Added per-phase timing instrumentation. The final SSE event now includes `{type:'timing', phases: {fetch_supabase, idempotency_scan, phase1_uploads, color_gets, phase2_services}}` (milliseconds) so we can verify the wins and catch any future regression without instrumenting again.
+
 ### Fixed
 - ABC Big 3 detection no longer leaks non-Big3 brands (Carlisle, BiTec, Westlake Royal, etc.) into the auto-selected tile row on Step 3. ABC's materialized view aggregates `is_big3_brand` via `BOOL_OR` over all items in a family, so a Carlisle family with even one Big-3-flagged item would mark the whole family `is_big3_brand=true` while `MIN(manufacturer_norm)` returned "Carlisle" as the display name. `app/api/brands/route.ts` now uses the canonical `QXO_BIG3` set (Gaf / Certainteed / Owens Corning) for ABC, same as QXO; only SRS uses the column lookup.
 - ABC products with empty `family_name` no longer fail upload with "Product Name is Mandatory". `app/api/upload/route.ts` now filters them out before the upload loop and reports the count via a `{type:'skip'}` SSE event, tallied into `uploadSummary.skipped`. The empty-name rows are catalog-data noise from the ABC API ingest — they were never real products.

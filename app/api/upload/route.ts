@@ -11,7 +11,13 @@ import { mapWithLimit } from '@/lib/limit'
 import { catalogConfig } from '@/lib/catalog-source'
 import type { CatalogSource } from '@/types/wizard'
 
-const OPTION_GET_CONCURRENCY = 10
+const OPTION_GET_CONCURRENCY = 15
+const IDEMPOTENCY_SCAN_CONCURRENCY = 8
+const IDEMPOTENCY_PAGE_SIZE = 100
+const IDEMPOTENCY_MAX_PAGES = 250
+// Inter-batch pause — was 3000ms but fetchWithRetry handles 429s per-request,
+// so a global multi-second sleep just adds idle time. 500ms keeps us polite.
+const BATCH_PAUSE_MS = 500
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -50,7 +56,14 @@ export async function POST(req: NextRequest) {
       }
       req.signal.addEventListener('abort', () => { streamClosed = true })
 
+      // Per-phase timing — emitted in the final `done` event for diagnostics.
+      const timing = { fetch_supabase: 0, idempotency_scan: 0, phase1_uploads: 0, color_gets: 0, phase2_services: 0 }
+      const phaseStart = (): number => performance.now()
+      const phaseEnd = (start: number): number => Math.round(performance.now() - start)
+
       try {
+        const tFetch = phaseStart()
+
         // Merge universal accessory IDs into the upload batch (deduplicated)
         const accessoryIds: (number | string)[] =
           cfg.source === 'srs' ? ACCESSORY_PRODUCT_IDS :
@@ -284,32 +297,70 @@ export async function POST(req: NextRequest) {
         const colorCatalogMap: Record<string, Array<{ color_name: string; variant_code: string; option_uid: string; purchase_price: number | null }>> = {}
         const batches = chunks(allProducts, 100)
 
+        timing.fetch_supabase = phaseEnd(tFetch)
+        const tIdem = phaseStart()
+
         // ── Idempotency: fetch existing Zuper products + map by stamped product_id
+        // Parallel page-fetch — the sequential version dominated wall-clock time
+        // on accounts saturated with prior test products. First page tells us
+        // total_records; remaining pages fan out at IDEMPOTENCY_SCAN_CONCURRENCY.
         const existingByProductId = new Map<string, string>()
-        try {
-          let page = 1
-          while (page <= 250 && !streamClosed) {
-            const r = await fetchWithRetry(`${baseUrl}products?count=100&page=${page}`, {
-              headers: zuperHeaders(apiKey),
-            })
-            const rows: { product_uid?: string; product_id?: string | number }[] = r.json?.data ?? []
-            if (rows.length === 0) break
-            for (const p of rows) {
-              if (p.product_id && p.product_uid) {
-                existingByProductId.set(String(p.product_id), p.product_uid)
-              }
+        const ingestPage = (rows: { product_uid?: string; product_id?: string | number }[]) => {
+          for (const p of rows) {
+            if (p.product_id && p.product_uid) {
+              existingByProductId.set(String(p.product_id), p.product_uid)
             }
-            if (rows.length < 100) break
-            page++
           }
+        }
+        try {
+          const first = await fetchWithRetry(`${baseUrl}products?count=${IDEMPOTENCY_PAGE_SIZE}&page=1`, {
+            headers: zuperHeaders(apiKey),
+          })
+          const firstRows = (first.json?.data ?? []) as Parameters<typeof ingestPage>[0]
+          ingestPage(firstRows)
+          const totalRecords: number | undefined = typeof first.json?.total_records === 'number' ? first.json.total_records : undefined
+
+          if (firstRows.length >= IDEMPOTENCY_PAGE_SIZE) {
+            const totalPages = totalRecords
+              ? Math.min(Math.ceil(totalRecords / IDEMPOTENCY_PAGE_SIZE), IDEMPOTENCY_MAX_PAGES)
+              : IDEMPOTENCY_MAX_PAGES   // unknown total — bounded fallback
+            emit({ type: 'idempotency_scan_progress', pageNumber: 1, totalPages })
+
+            // Pages 2..totalPages in chunks of IDEMPOTENCY_SCAN_CONCURRENCY so we can
+            // stop early when a chunk returns a short page (no total_records case).
+            let stop = false
+            for (let chunkStart = 2; chunkStart <= totalPages && !stop && !streamClosed; chunkStart += IDEMPOTENCY_SCAN_CONCURRENCY) {
+              const chunkEnd = Math.min(chunkStart + IDEMPOTENCY_SCAN_CONCURRENCY - 1, totalPages)
+              const pageNums = Array.from({ length: chunkEnd - chunkStart + 1 }, (_, i) => chunkStart + i)
+              const pages = await mapWithLimit(pageNums, IDEMPOTENCY_SCAN_CONCURRENCY, async (pageNumber) => {
+                const r = await fetchWithRetry(`${baseUrl}products?count=${IDEMPOTENCY_PAGE_SIZE}&page=${pageNumber}`, {
+                  headers: zuperHeaders(apiKey),
+                })
+                return { pageNumber, rows: (r.json?.data ?? []) as Parameters<typeof ingestPage>[0] }
+              })
+              // Ingest in page order so the map stays deterministic across re-runs.
+              pages.sort((a, b) => a.pageNumber - b.pageNumber)
+              for (const p of pages) {
+                ingestPage(p.rows)
+                if (p.rows.length < IDEMPOTENCY_PAGE_SIZE) stop = true
+              }
+              emit({ type: 'idempotency_scan_progress', pageNumber: chunkEnd, totalPages })
+            }
+          }
+
           emit({ type: 'idempotency_scan', existingCount: existingByProductId.size })
         } catch (e: unknown) {
           emit({ type: 'idempotency_scan', existingCount: 0, warning: `Existing-product scan failed: ${(e as Error).message}. Re-uploads may create duplicates.` })
         }
 
-        for (const [i, batch] of Array.from(batches.entries())) {
-          const needGet: { srsId: number; zuperUid: string; product: SrsProduct }[] = []
+        timing.idempotency_scan = phaseEnd(tIdem)
+        const tPhase1 = phaseStart()
 
+        // Color option GETs are deferred to a single end-of-Phase-1 pass so
+        // they don't block subsequent batches. Each batch just accumulates.
+        const allNeedGet: { srsId: number; zuperUid: string; product: SrsProduct }[] = []
+
+        for (const [i, batch] of Array.from(batches.entries())) {
           await Promise.allSettled(batch.map(async (product) => {
             const payload = buildProductPayload(
               product,
@@ -347,7 +398,7 @@ export async function POST(req: NextRequest) {
                 })
 
                 if (zuperUid && hasColors) {
-                  needGet.push({ srsId: product.product_id, zuperUid, product })
+                  allNeedGet.push({ srsId: product.product_id, zuperUid, product })
                 } else if (productVariants.some(v => v.variant_code)) {
                   const variantEntries = productVariants
                     .filter(v => v.variant_code)
@@ -375,31 +426,42 @@ export async function POST(req: NextRequest) {
             }
           }))
 
-          if (needGet.length > 0 && !streamClosed) {
-            await mapWithLimit(needGet, OPTION_GET_CONCURRENCY, async ({ srsId, zuperUid, product }) => {
-              try {
-                const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
-                  headers: zuperHeaders(apiKey),
-                })
-                const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
-                const optionValues: Array<{ option_uid: string; option_value: string }> = getProductData?.option?.option_values ?? []
-                if (optionValues.length > 0) {
-                  const colorMap = variantCodeByColor.get(srsId)
-                  colorCatalogMap[String(srsId)] = optionValues.map(ov => ({
-                    color_name: ov.option_value,
-                    variant_code: colorMap?.get(ov.option_value) ?? '',
-                    option_uid: ov.option_uid,
-                    purchase_price: product.purchase_price,
-                  }))
-                }
-              } catch { /* non-fatal — product is uploaded, vendor catalog skips this one */ }
-            })
-          }
-
           emit({ type: 'batch_complete', batch: i + 1, of: batches.length, uploaded, updated, errors: errors.length })
           if (streamClosed) break
-          if (i < batches.length - 1) await sleep(3000)
+          if (i < batches.length - 1) await sleep(BATCH_PAUSE_MS)
         }
+
+        timing.phase1_uploads = phaseEnd(tPhase1)
+        const tColor = phaseStart()
+
+        // ── End-of-Phase-1: fetch color option_uids for all color-bearing
+        // products in one pass. Deferred from per-batch so it doesn't block
+        // the next batch's POSTs. Concurrency raised to OPTION_GET_CONCURRENCY
+        // (15) since we're no longer fighting the batch-pacing budget.
+        if (allNeedGet.length > 0 && !streamClosed) {
+          emit({ type: 'color_gets_start', count: allNeedGet.length })
+          await mapWithLimit(allNeedGet, OPTION_GET_CONCURRENCY, async ({ srsId, zuperUid, product }) => {
+            try {
+              const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
+                headers: zuperHeaders(apiKey),
+              })
+              const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
+              const optionValues: Array<{ option_uid: string; option_value: string }> = getProductData?.option?.option_values ?? []
+              if (optionValues.length > 0) {
+                const colorMap = variantCodeByColor.get(srsId)
+                colorCatalogMap[String(srsId)] = optionValues.map(ov => ({
+                  color_name: ov.option_value,
+                  variant_code: colorMap?.get(ov.option_value) ?? '',
+                  option_uid: ov.option_uid,
+                  purchase_price: product.purchase_price,
+                }))
+              }
+            } catch { /* non-fatal — product is uploaded, vendor catalog skips this one */ }
+          })
+        }
+
+        timing.color_gets = phaseEnd(tColor)
+        const tPhase2 = phaseStart()
 
         // ── Phase 2: Upload services (same for both catalogs) ─────────────────
         const servicesToUpload = SERVICE_CATALOG.filter(s =>
@@ -442,6 +504,8 @@ export async function POST(req: NextRequest) {
           }))
         }
 
+        timing.phase2_services = phaseEnd(tPhase2)
+        emit({ type: 'timing', phases: timing })
         emit({ type: 'done', uploaded, updated, skipped: skippedNoName, errors, productIdMap, serviceIdMap, colorCatalogMap, servicesUploaded, serviceErrors })
         controller.close()
       } catch (e: unknown) {
