@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { CATEGORY_NORM } from '@/lib/category-norm'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 import { QXO_ACCESSORY_PRODUCT_KEYS } from '@/lib/qxo-accessory-catalog'
+import { ABC_ACCESSORY_PRODUCT_IDS } from '@/lib/abc-accessory-catalog'
 import {
   catalogConfig, getStockedProductKeys,
   SRS_TRADE_CATEGORY, QXO_TRADE_CATEGORIES,
@@ -73,14 +74,14 @@ export async function POST(req: NextRequest) {
       // Common selected columns — names line up across both catalogs:
       // we always alias the brand column to manufacturer_norm and the category
       // column to product_category to keep downstream code simple.
-      const SELECT = (cfg.source === 'srs')
+      const SELECT = (cfg.source !== 'qxo')
         ? 'product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price'
         : 'product_key, product_name, category_norm, brand_norm, product_line, family_tier, proposal_line_item, suggested_price'
 
       const buildQuery = (pageStart: number, pageEnd: number) => {
         let q: any = supabase.from(cfg.tables.products).select(SELECT).eq('exclude_default', false)
-        if (cfg.source === 'srs') {
-          // Roofing: brands OR universal manufacturer-varies items.
+        if (cfg.source !== 'qxo') {
+          // SRS + ABC: same column shape. Roofing: brands OR universal manufacturer-varies items.
           if (trade === 'roofing') {
             q = q.or(`manufacturer_norm.in.(${brands.join(',')}),and(is_universal.eq.true,manufacturer_norm.ilike.%manufacturer varies%)`)
           } else if (trade === 'gutters') {
@@ -137,6 +138,14 @@ export async function POST(req: NextRequest) {
       for (const r of (accessories ?? []) as Record<string, unknown>[]) {
         allProducts.push(toPreviewRow(r, 'srs'))
       }
+    } else if (cfg.source === 'abc' && ABC_ACCESSORY_PRODUCT_IDS.length > 0) {
+      const { data: accessories } = await supabase
+        .from('abc_products')
+        .select('product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price')
+        .in('product_id', ABC_ACCESSORY_PRODUCT_IDS)
+      for (const r of (accessories ?? []) as Record<string, unknown>[]) {
+        allProducts.push(toPreviewRow(r, 'abc'))
+      }
     } else if (QXO_ACCESSORY_PRODUCT_KEYS.length > 0) {
       const { data: accessories } = await supabase
         .from('qxo_products')
@@ -188,7 +197,9 @@ export async function POST(req: NextRequest) {
     const accessoryKeys = new Set<string>(
       cfg.source === 'srs'
         ? ACCESSORY_PRODUCT_IDS.map(String)
-        : QXO_ACCESSORY_PRODUCT_KEYS,
+        : cfg.source === 'abc'
+          ? ABC_ACCESSORY_PRODUCT_IDS.map(String)
+          : QXO_ACCESSORY_PRODUCT_KEYS,
     )
     const accessoryCount = filtered.filter(p => accessoryKeys.has(String(p.product_id))).length
 
@@ -204,7 +215,8 @@ export async function POST(req: NextRequest) {
 }
 
 function toPreviewRow(r: Record<string, unknown>, source: CatalogSource): PreviewRow {
-  if (source === 'srs') {
+  if (source !== 'qxo') {
+    // SRS + ABC share the same column shape.
     return {
       product_id:         r.product_id as number,
       product_name:       r.product_name as string,

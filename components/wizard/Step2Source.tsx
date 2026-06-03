@@ -26,6 +26,13 @@ const SOURCES: SourceDef[] = [
     productCount: '76,812',
     brands: 'GAF · CertainTeed · Owens Corning · TRI-BUILT · Mastic · 2,400+ more',
   },
+  {
+    id: 'abc',
+    label: 'ABC Supply',
+    blurb: '316K SKUs across roofing, siding, windows, lumber. Branch-agnostic — all products available.',
+    productCount: '34,868',
+    brands: 'GAF · CertainTeed · Owens Corning · James Hardie · IKO · 1,500+ more',
+  },
 ]
 
 const SOURCE_ICONS: Record<CatalogSource, React.ReactNode> = {
@@ -37,6 +44,11 @@ const SOURCE_ICONS: Record<CatalogSource, React.ReactNode> = {
   qxo: (
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="10" r="3" /><path d="M12 21s-7-7-7-12a7 7 0 0114 0c0 5-7 12-7 12z" />
+    </svg>
+  ),
+  abc: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 21V8l9-5 9 5v13" /><path d="M9 21V12h6v9" />
     </svg>
   ),
 }
@@ -94,6 +106,7 @@ export function Step2Source() {
 
   const canContinue =
     catalogSource === 'srs' ||
+    catalogSource === 'abc' ||
     (catalogSource === 'qxo' && selectedQxoBranch != null)
 
   return (

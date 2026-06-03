@@ -1,6 +1,6 @@
 export type Trade = 'roofing' | 'gutters' | 'siding'
 
-export type CatalogSource = 'srs' | 'qxo'
+export type CatalogSource = 'srs' | 'qxo' | 'abc'
 
 export interface QxoBranch {
   branchNum: number

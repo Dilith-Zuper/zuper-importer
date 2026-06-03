@@ -70,6 +70,38 @@ const SRS_VENDOR = {
   vendor_bank_details: null,
 }
 
+// ABC Supply HQ is in Beloit, Wisconsin.
+const ABC_VENDOR = {
+  vendor_name:         'ABC Supply Co Inc',
+  vendor_display_name: 'ABC Supply Co Inc',
+  vendor_contact_name: 'ABC Supply',
+  vendor_email:        'abcsupply@email.com',
+  vendor_description:  '',
+  tax_identifier:      null,
+  vendor_lead_time:    null,
+  vendor_contact_no:   { work: '6083641500', mobile: '6083641500' },
+  vendor_delivery_method: 'JOB_ADDRESS',
+  vendor_address: {
+    street: '', city: '', country: '', email: 'abcsupply@email.com',
+    phone_number: '6083641500', zip_code: '', state: '',
+    geo_cordinates: [0, 0], landmark: '',
+  },
+  vendor_billing_address: {
+    street:       '1 ABC Parkway',
+    city:         'Beloit',
+    state:        'Wisconsin',
+    country:      'United States',
+    zip_code:     '53511',
+    email:        'abcsupply@email.com',
+    phone_number: '6083641500',
+    geo_cordinates: [42.5083, -89.0318],
+    landmark:     '',
+  },
+  attachments:       [],
+  custom_fields:     [],
+  vendor_bank_details: null,
+}
+
 export async function POST(req: NextRequest) {
   const {
     baseUrl, apiKey,
@@ -84,7 +116,10 @@ export async function POST(req: NextRequest) {
     catalogSource?: CatalogSource
   } = await req.json()
 
-  const VENDOR_RECORD = catalogSource === 'qxo' ? QXO_VENDOR : SRS_VENDOR
+  const VENDOR_RECORD =
+    catalogSource === 'qxo' ? QXO_VENDOR :
+    catalogSource === 'abc' ? ABC_VENDOR :
+    SRS_VENDOR
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({

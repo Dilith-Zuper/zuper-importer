@@ -79,7 +79,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   // uploads. Branch also resets because it's QXO-specific.
   setCatalogSource: (source) => set((s) => ({
     catalogSource: source,
-    selectedQxoBranch: source === 'srs' ? null : s.selectedQxoBranch,
+    selectedQxoBranch: source === 'qxo' ? s.selectedQxoBranch : null,
     selectedBrands: [],
     selectedGutterBrands: [],
     selectedSidingBrands: [],

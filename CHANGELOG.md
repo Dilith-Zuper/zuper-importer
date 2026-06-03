@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **ABC Supply** as a third catalog source alongside SRS and QXO.
+  - **Step 2 Source** now offers ABC Supply (34,868 family-grouped products from a 316K-SKU raw catalog). Branch-agnostic in v1 — all products available regardless of location.
+  - `lib/catalog-source.ts` — `CatalogSource` widened to `'srs' | 'qxo' | 'abc'`, `ABC` config added pointing at the new `abc_products` + `abc_variants` Postgres views. ABC mirrors SRS's column layout (the views were designed for that), so every `cfg.source === 'srs'` branch in the API routes was generalised to `cfg.source !== 'qxo'`.
+  - `lib/abc-accessory-catalog.ts` — 15 ABC `family_id` strings (e.g. `PFam_3358459` for Lomanco LPR Ridge Vent) covering drip edge, underlayment, ice & water, coil nails, plastic cap nails, step flashing, valley, pipe boot, ridge vent, starter strip, caulk, counter/headwall flashing, gutter apron, box vent. Picks curated from `find-abc-accessory-gaps.py` output — prefers Big 3 brands and real `PFam_*` family records over inventory `PLot_*` lots.
+  - `app/api/create-vendor/route.ts` creates an `ABC Supply Co Inc` vendor record (1 ABC Parkway, Beloit WI) when source=abc.
+  - `store/wizard-store.ts` — `setCatalogSource` now nulls `selectedQxoBranch` whenever the source isn't QXO (covers SRS↔ABC↔QXO transitions cleanly).
+
+### Changed
+- API routes generalized to handle three catalogs:
+  - `brands/route.ts`, `product-lines/route.ts`, `preview/route.ts`, `validate/route.ts`, `upload/route.ts` — SRS and ABC share the same column layout, query patterns, and category enum; QXO continues to need the branch-stocked filter and free-text category arrays.
+  - `upload/route.ts` ABC branch: ABC's family_ids are TEXT (`PFam_*`), so it queries `abc_products` view by string keys but strips non-digits when stamping into the SrsProduct shape (matches the existing QXO pattern). Pricing fallback medians are computed from ABC's own `suggested_price` data.
+
+### Known limitations
+- ABC **proposal templates (Step 11)** intentionally not yet wired into the G/B/B engine — same limitation as QXO. `proposal-preview` returns `__unsupported: 'abc'` and Step10Proposals lets CSMs skip. The SRS engine uses `primary_item` ordering and brand-specific tier-upgrade rules (CertainTeed Best → HT Ice & Water, OC Better/Best → WoodStart Cool) that don't apply cleanly to ABC's family-id-keyed schema. CSMs can still upload the catalog, build proposal templates manually in Zuper, and run the vendor catalog step.
+
 ## [v0.5.1] - 2026-05-19
 
 ### Fixed

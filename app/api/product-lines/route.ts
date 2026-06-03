@@ -52,7 +52,8 @@ export async function POST(req: NextRequest) {
       if (cfg.source === 'qxo') q = q.eq('is_stocked_anywhere', true)
 
       if (trade === 'gutters' || trade === 'siding') {
-        if (cfg.source === 'srs') {
+        if (cfg.source !== 'qxo') {
+          // SRS + ABC use canonical SRS_TRADE_CATEGORY map
           q = q.eq(cfg.cols.category, SRS_TRADE_CATEGORY[trade])
         } else {
           q = q.in(cfg.cols.category, QXO_TRADE_CATEGORIES[trade])

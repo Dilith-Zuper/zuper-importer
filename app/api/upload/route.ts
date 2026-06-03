@@ -6,6 +6,7 @@ import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 import { QXO_ACCESSORY_PRODUCT_KEYS } from '@/lib/qxo-accessory-catalog'
+import { ABC_ACCESSORY_PRODUCT_IDS } from '@/lib/abc-accessory-catalog'
 import { mapWithLimit } from '@/lib/limit'
 import { catalogConfig } from '@/lib/catalog-source'
 import type { CatalogSource } from '@/types/wizard'
@@ -51,9 +52,10 @@ export async function POST(req: NextRequest) {
 
       try {
         // Merge universal accessory IDs into the upload batch (deduplicated)
-        const accessoryIds: (number | string)[] = cfg.source === 'srs'
-          ? ACCESSORY_PRODUCT_IDS
-          : QXO_ACCESSORY_PRODUCT_KEYS
+        const accessoryIds: (number | string)[] =
+          cfg.source === 'srs' ? ACCESSORY_PRODUCT_IDS :
+          cfg.source === 'abc' ? ABC_ACCESSORY_PRODUCT_IDS :
+          QXO_ACCESSORY_PRODUCT_KEYS
         const seen = new Set<string>()
         const allProductIds: (number | string)[] = []
         for (const id of [...accessoryIds, ...productIds]) {
@@ -92,6 +94,59 @@ export async function POST(req: NextRequest) {
               .eq('is_restricted', false)
             if (error) throw new Error(error.message)
             allVariants.push(...(data as SrsVariant[]))
+          }
+        } else if (cfg.source === 'abc') {
+          // ABC — family_ids are TEXT (e.g. "PFam_3359303"). Keep as strings for
+          // the .in() filter, but strip non-digits when stamping into SrsProduct
+          // since downstream code groups variants by numeric product_id.
+          const keys = allProductIds.map(String)
+          // Map original PFam_xxx → digit-only numeric so variants group correctly
+          const toNum = (s: string) => Number(s.replace(/\D/g, '')) || 0
+          for (let from = 0; from < keys.length; from += PAGE) {
+            const chunk = keys.slice(from, from + PAGE)
+            const { data, error } = await supabase
+              .from('abc_products')
+              .select('product_id, product_name, product_category, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, proposal_line_item, family_tier')
+              .in('product_id', chunk)
+            if (error) throw new Error(error.message)
+            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+              const rawId = String(r.product_id)
+              allProducts.push({
+                product_id:          toNum(rawId),
+                product_name:        r.product_name as string,
+                product_category:    (r.product_category as string) ?? '',
+                manufacturer:        (r.manufacturer_norm as string) ?? null,
+                manufacturer_norm:   (r.manufacturer_norm as string) ?? null,
+                product_description: (r.product_description as string) ?? null,
+                product_uom:         (r.product_uom as string | string[] | null) ?? null,
+                product_image_url:   (r.product_image_url as string) ?? null,
+                suggested_price:     r.suggested_price as number | null,
+                purchase_price:      null,
+                proposal_line_item:  r.proposal_line_item as string | null,
+                family_tier:         r.family_tier as string | null,
+              })
+            }
+          }
+          // ABC variants — fetch by product_id (family_id text), map item_number → variant_code.
+          for (let from = 0; from < keys.length; from += 500) {
+            const chunk = keys.slice(from, from + 500)
+            const { data, error } = await supabase
+              .from('abc_variants')
+              .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
+              .in('product_id', chunk)
+              .eq('is_restricted', false)
+            if (error) throw new Error(error.message)
+            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+              allVariants.push({
+                variant_id:        toNum(String(r.variant_id)),
+                product_id:        toNum(String(r.product_id)),
+                variant_code:      (r.variant_code as string) ?? null,
+                color_name:        (r.color_name as string) ?? null,
+                size_name:         (r.size_name as string) ?? null,
+                variant_image_url: (r.variant_image_url as string) ?? null,
+                is_restricted:     false,
+              })
+            }
           }
         } else {
           // QXO — keys are TEXT (e.g. "C-412281"). Map rows into SrsProduct.
@@ -154,6 +209,13 @@ export async function POST(req: NextRequest) {
             let q: any
             if (cfg.source === 'srs') {
               q = supabase.from('srs_products')
+                .select('product_category, family_tier, suggested_price')
+                .not('suggested_price', 'is', null)
+                .gt('suggested_price', 0)
+                .range(pfFrom, pfFrom + PAGE_PRICE - 1)
+            } else if (cfg.source === 'abc') {
+              // ABC view exposes product_category directly (same name as SRS).
+              q = supabase.from('abc_products')
                 .select('product_category, family_tier, suggested_price')
                 .not('suggested_price', 'is', null)
                 .gt('suggested_price', 0)

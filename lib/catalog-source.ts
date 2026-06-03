@@ -24,11 +24,11 @@
 
 import type { CatalogSource } from '@/types/wizard'
 
-export const SOURCES: CatalogSource[] = ['srs', 'qxo']
+export const SOURCES: CatalogSource[] = ['srs', 'qxo', 'abc']
 
 export interface CatalogTables {
-  products: 'srs_products' | 'qxo_products'
-  variants: 'srs_variants' | 'qxo_variants'
+  products: 'srs_products' | 'qxo_products' | 'abc_products'
+  variants: 'srs_variants' | 'qxo_variants' | 'abc_variants'
 }
 
 export interface CatalogColumns {
@@ -84,8 +84,31 @@ const QXO: CatalogConfig = {
   branchAware:    true,
 }
 
+// ABC reads from Postgres views (abc_products + abc_variants) that aggregate
+// the raw 316K-row abc_items table to one row per family_id. The view exposes
+// the same column names as SRS, so ABC mirrors SRS's CatalogColumns config and
+// every route's SRS code path is reused for ABC via `!== 'qxo'` checks.
+// v1 is branch-agnostic — no abc_branches / abc_branch_sku tables exist yet.
+const ABC: CatalogConfig = {
+  source: 'abc',
+  tables: { products: 'abc_products', variants: 'abc_variants' },
+  cols: {
+    productPk:    'product_id',
+    brand:        'manufacturer_norm',
+    category:     'product_category',
+    variantPk:    'variant_id',
+    variantSku:   'variant_code',
+    variantColor: 'color_name',
+    variantFk:    'product_id',
+  },
+  hasStockedFlag: false,
+  branchAware:    false,
+}
+
 export function catalogConfig(source: CatalogSource): CatalogConfig {
-  return source === 'qxo' ? QXO : SRS
+  if (source === 'qxo') return QXO
+  if (source === 'abc') return ABC
+  return SRS
 }
 
 /**
@@ -161,14 +184,16 @@ export async function getStockedProductKeys(
 }
 
 /**
- * Big 3 brand list for the catalog. SRS uses an is_big3_brand column;
+ * Big 3 brand list for the catalog. SRS and ABC use an is_big3_brand column;
  * QXO doesn't have one (yet), so we hardcode the canonical names.
  */
 export const QXO_BIG3 = new Set(['Gaf', 'Certainteed', 'Owens Corning'])
 
 /**
- * Common gutter / siding category filters per source. SRS uses enum names,
- * QXO uses free-text category_norm matches.
+ * Common gutter / siding category filters per source. SRS and ABC use the
+ * same enum-style canonical category names (since ABC categories were
+ * normalized to SRS canon by enrich-abc-category-norm.py). QXO uses
+ * free-text category_norm matches and needs the array form below.
  */
 export const SRS_TRADE_CATEGORY: Record<string, string> = {
   gutters: 'GUTTER/ALUMINUM/COIL',

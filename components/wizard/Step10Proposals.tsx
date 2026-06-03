@@ -131,9 +131,9 @@ export function Step10Proposals() {
       }),
     }).then(r => r.json())
 
-    if (d.__unsupported === 'qxo') {
-      // QXO catalog: proposal-preview returns an explicit marker rather than
-      // an empty result so we can show a clear "templates not yet available"
+    if (d.__unsupported === 'qxo' || d.__unsupported === 'abc') {
+      // QXO + ABC catalogs: proposal-preview returns an explicit marker rather
+      // than an empty result so we can show a clear "templates not yet available"
       // message instead of a confusing blank state.
       setProposalPackages({})
       setGutterProposalItems([])

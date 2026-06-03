@@ -85,14 +85,14 @@ export async function POST(req: NextRequest) {
       catalogSource?: CatalogSource
     }
 
-    // QXO proposal templates are not yet wired into the G/B/B engine. The
-    // SRS-specific tier rules, accessory catalog mapping, and primary_item
-    // ordering all assume SRS shape. We return an empty result with a marker
-    // so the UI can show a "skip templates" affordance and proceed.
-    if (catalogSource === 'qxo') {
+    // QXO + ABC proposal templates aren't wired into the G/B/B engine yet.
+    // The SRS-specific tier-upgrade rules, accessory ordering by primary_item,
+    // and brand-product-line mappings all assume SRS shape. We return an empty
+    // result with a marker so the UI can show a "skip templates" affordance.
+    if (catalogSource === 'qxo' || catalogSource === 'abc') {
       return NextResponse.json({
-        __unsupported: 'qxo',
-        __message: 'Proposal templates not yet available for QXO. Build templates manually in Zuper, or switch to SRS.',
+        __unsupported: catalogSource,
+        __message: `Proposal templates not yet available for ${catalogSource.toUpperCase()}. Build templates manually in Zuper, or switch to SRS.`,
       })
     }
 

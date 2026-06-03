@@ -55,6 +55,11 @@ export async function POST(req: NextRequest) {
             q = supabase.from('srs_products')
               .select('product_category')
               .in('product_id', slice.map(Number))
+          } else if (cfg.source === 'abc') {
+            // ABC view exposes product_category directly; product_id is TEXT (PFam_*)
+            q = supabase.from('abc_products')
+              .select('product_category')
+              .in('product_id', slice.map(String))
           } else {
             q = supabase.from('qxo_products')
               .select('product_category:category_norm')

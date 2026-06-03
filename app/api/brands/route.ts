@@ -54,7 +54,8 @@ export async function POST(req: NextRequest) {
         .eq('exclude_default', false)
         .not(cfg.cols.brand, 'is', null)
 
-      if (cfg.source === 'srs') {
+      if (cfg.source !== 'qxo') {
+        // SRS + ABC both have generic-brand strings to strip out
         q = q.not(cfg.cols.brand, 'ilike', '%manufacturer varies%')
       }
       if (cfg.source === 'qxo') {
@@ -62,7 +63,8 @@ export async function POST(req: NextRequest) {
       }
 
       if (trade === 'gutters' || trade === 'siding') {
-        if (cfg.source === 'srs') {
+        if (cfg.source !== 'qxo') {
+          // SRS + ABC use the same canonical SRS_TRADE_CATEGORY map
           q = q.eq(cfg.cols.category, SRS_TRADE_CATEGORY[trade])
         } else {
           q = q.in(cfg.cols.category, QXO_TRADE_CATEGORIES[trade])
@@ -133,23 +135,23 @@ export async function POST(req: NextRequest) {
 
     // Roofing — group into big3 / topSecondary / otherBrands
     const isBig3 = (name: string) =>
-      cfg.source === 'srs'
-        ? false  // SRS lookup uses is_big3_brand below
+      cfg.source !== 'qxo'
+        ? false  // SRS + ABC use is_big3_brand column lookup below
         : QXO_BIG3.has(name)
 
-    // For SRS, fetch is_big3_brand to identify the Big 3 — separate query
+    // For SRS + ABC, fetch is_big3_brand to identify the Big 3 — separate query
     // because the count-grouping pass doesn't include other columns.
     let big3Names = new Set<string>()
-    if (cfg.source === 'srs') {
+    if (cfg.source !== 'qxo') {
       const { data, error } = await supabase
-        .from('srs_products')
-        .select('manufacturer_norm')
+        .from(cfg.tables.products)
+        .select(cfg.cols.brand)
         .eq('is_big3_brand', true)
         .eq('exclude_default', false)
-        .not('manufacturer_norm', 'is', null)
+        .not(cfg.cols.brand, 'is', null)
         .limit(1000)
       if (error) throw new Error(error.message)
-      for (const r of (data ?? [])) big3Names.add((r as { manufacturer_norm: string }).manufacturer_norm)
+      for (const r of (data ?? [])) big3Names.add((r as Record<string, string>)[cfg.cols.brand])
     } else {
       big3Names = new Set(QXO_BIG3)
     }
