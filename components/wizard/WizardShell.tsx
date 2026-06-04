@@ -30,11 +30,10 @@ const STEPS = [
 ]
 
 export function WizardShell() {
-  const { step, catalogSource } = useWizardStore()
-  // Proposal templates (step 11) are SRS-only — the engine uses primary_item
-  // ordering and brand-specific tier-upgrade rules that don't apply to ABC/QXO.
-  // Hide the "Templates" circle + adjust the "Step X of N" badge for those.
-  const visibleSteps = catalogSource === 'srs' ? STEPS : STEPS.slice(0, 10)
+  const { step } = useWizardStore()
+  // v2: proposal templates work for all three catalog sources (the SRS-only
+  // gate was removed once proposal-preview was generalized in commit 2073b6d).
+  const visibleSteps = STEPS
   const [toastReason, setToastReason] = useState<string | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const logoClickCount = useRef(0)

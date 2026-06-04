@@ -19,7 +19,7 @@ export function Step9Vendor() {
   const {
     baseUrl, apiKey, companyName,
     productIdMap, colorCatalogMap,
-    setStep, reset,
+    setStep,
     catalogSource,
   } = useWizardStore()
 
@@ -181,7 +181,7 @@ export function Step9Vendor() {
         </button>
       )}
 
-      {phase === 'done' && catalogSource === 'srs' && (
+      {phase === 'done' && (
         <button
           onClick={() => setStep(11)}
           className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
@@ -190,16 +190,7 @@ export function Step9Vendor() {
         </button>
       )}
 
-      {phase === 'done' && catalogSource !== 'srs' && (
-        <button
-          onClick={reset}
-          className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-full transition-colors text-base"
-        >
-          Start New Import
-        </button>
-      )}
-
-      {(phase === 'done' || phase === 'error') && catalogSource === 'srs' && (
+      {(phase === 'done' || phase === 'error') && (
         <button
           onClick={() => setStep(11)}
           className="w-full h-11 border border-[#E5E2DC] text-gray-600 font-semibold rounded-full hover:bg-gray-50 transition-colors text-sm"
