@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **G/B/B proposal templates now work for ABC + QXO (v2).** `app/api/proposal-preview/route.ts` was generalized from SRS-only to source-agnostic. The bail with `__unsupported` is gone for both ABC and QXO; the engine builds full Good/Better/Best packages per brand. Three structural changes:
+  - **Table-agnostic queries** — every `srs_products` hardcoding now uses `cfg.tables.products` + `cfg.cols.productPk` + `cfg.cols.brand` + `cfg.cols.category`. Same code path runs for SRS, ABC, and QXO.
+  - **`primary_item` substitute** — SRS keeps its curated `primary_item` DB column. ABC and QXO use a new `lib/flagship-lines.ts` helper that intersects `product_line` strings with curated regex patterns per brand (e.g. GAF `timberline (hd|hdz|uhdz|natural shadow)`, CertainTeed `Landmark`, OC `Duration|Oakridge|Trudefinition`). Picked via the wizard's running dev server against the abc_products materialized view.
+  - **`accessory_tier`-driven G/B/B differentiation** — for ABC and QXO, the universal accessory map is rebuilt per proposal tier by querying `accessory_tier = good_accessory` / `better_accessory` / `best_accessory` and ordering by suggested_price asc (or desc for Best). Good packages get cheaper accessories, Best packages get premium ones — making the three tiers actually differ on price. SRS keeps its single curated accessory map per the user's v2 decision.
+- New `lib/flagship-lines.ts` — `FLAGSHIP_PATTERNS: Record<CatalogSource, Record<brand, RegExp[]>>` plus `isFlagship(source, brand, productLine)`. QXO entries are a v2.1 follow-up once product_line patterns are spot-checked.
+- `lib/catalog-source.ts` — new `ACCESSORY_TIER_BY_PROPOSAL` constant maps each proposal tier to its matching accessory_tier value.
+- SRS tier-upgrade rules port verbatim to ABC. Audit confirmed `OC Woodstart Cool Starter` matches the `%WoodStart Cool%` ILIKE pattern, and `resolveTierOverrides()` now passes `cfg` so the query runs against the active catalog table. CertainTeed Best Ice & Water — High Temp upgrade fires correctly on ABC (verified end-to-end against the dev server).
+
 ### Changed
 - **Step 11 (proposal templates) hidden upfront for ABC + QXO.** The SRS proposal engine relies on `primary_item` ordering and brand-specific tier-upgrade rules that don't apply to ABC's family-id-keyed schema or QXO's branch-scoped catalog, so the route already bailed with `__unsupported`. The wizard now also hides the step from the 11-circle progress indicator (becomes 10), drops the "Skip to Proposal Templates" button on Step 7 Done, and replaces the "Build Proposal Templates →" CTA on Step 9 Vendor with "Start New Import" for ABC/QXO. SRS flow unchanged. Defense in depth retained: deep-linking to `step === 11` with ABC selected still renders the existing `__unsupported` notice.
 - **Upload route Phase 1 sped up by ~60-70%** for accounts with prior products and uploads in the 2K+ product range. Three pacing changes in `app/api/upload/route.ts`:

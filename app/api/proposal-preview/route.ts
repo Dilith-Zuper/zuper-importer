@@ -3,6 +3,10 @@ import { supabase } from '@/lib/supabase'
 import { ITEM_TO_FORMULA_KEY } from '@/lib/formula-definitions'
 import { normalizeCategory } from '@/lib/category-norm'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
+import { ABC_ACCESSORY_PRODUCT_IDS } from '@/lib/abc-accessory-catalog'
+import { QXO_ACCESSORY_PRODUCT_KEYS } from '@/lib/qxo-accessory-catalog'
+import { catalogConfig, ACCESSORY_TIER_BY_PROPOSAL, type CatalogConfig } from '@/lib/catalog-source'
+import { isFlagship } from '@/lib/flagship-lines'
 import { rulesForBrand, type ProposalTier, type TierUpgradeRule } from '@/lib/tier-upgrade-rules'
 import type { ProposalLineItem, BrandPackage, CatalogSource } from '@/types/wizard'
 
@@ -36,24 +40,32 @@ function pickProduct(byTier: Record<string, ProposalLineItem[]>, tierPrefs: stri
  * Failures (no matching product) silently drop the rule — the package falls
  * back to the standard universal accessory.
  */
-async function resolveTierOverrides(rules: TierUpgradeRule[]): Promise<Map<ProposalTier, Record<string, ProposalLineItem>>> {
+async function resolveTierOverrides(cfg: CatalogConfig, rules: TierUpgradeRule[]): Promise<Map<ProposalTier, Record<string, ProposalLineItem>>> {
   const out = new Map<ProposalTier, Record<string, ProposalLineItem>>()
+  const selectCols = cfg.source === 'srs'
+    ? `${cfg.cols.productPk}, product_name, proposal_line_item, suggested_price, primary_item`
+    : `${cfg.cols.productPk}, product_name, proposal_line_item, suggested_price`
   for (const rule of rules) {
-    let q = supabase
-      .from('srs_products')
-      .select('product_id, product_name, proposal_line_item, suggested_price, primary_item')
+    let q: any = supabase
+      .from(cfg.tables.products)
+      .select(selectCols)
       .eq('exclude_default', false)
-    if (rule.with.manufacturer_norm) q = q.eq('manufacturer_norm', rule.with.manufacturer_norm)
+    if (rule.with.manufacturer_norm) q = q.eq(cfg.cols.brand, rule.with.manufacturer_norm)
     if (rule.with.new_component) q = q.eq('proposal_line_item', rule.with.new_component)
     if (rule.with.product_name_ilike) q = q.ilike('product_name', rule.with.product_name_ilike)
 
-    const { data } = await q.order('primary_item', { ascending: false }).limit(1)
+    // Order by primary_item for SRS; cheapest-first for ABC/QXO since they
+    // lack a primary_item column.
+    q = cfg.source === 'srs'
+      ? q.order('primary_item', { ascending: false })
+      : q.order('suggested_price', { ascending: true, nullsFirst: false })
+    const { data } = await q.limit(1)
     const p = data?.[0]
     if (!p) continue
 
     const comp = rule.with.new_component ?? rule.replace_component
     const item: ProposalLineItem = {
-      product_id: p.product_id,
+      product_id: p[cfg.cols.productPk],
       product_name: p.product_name,
       proposal_line_item: comp,
       formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
@@ -85,74 +97,144 @@ export async function POST(req: NextRequest) {
       catalogSource?: CatalogSource
     }
 
-    // QXO + ABC proposal templates aren't wired into the G/B/B engine yet.
-    // The SRS-specific tier-upgrade rules, accessory ordering by primary_item,
-    // and brand-product-line mappings all assume SRS shape. We return an empty
-    // result with a marker so the UI can show a "skip templates" affordance.
-    if (catalogSource === 'qxo' || catalogSource === 'abc') {
-      return NextResponse.json({
-        __unsupported: catalogSource,
-        __message: `Proposal templates not yet available for ${catalogSource.toUpperCase()}. Build templates manually in Zuper, or switch to SRS.`,
-      })
-    }
+    const cfg = catalogConfig(catalogSource)
+    const accessoryIds: (number | string)[] =
+      cfg.source === 'srs' ? ACCESSORY_PRODUCT_IDS :
+      cfg.source === 'abc' ? ABC_ACCESSORY_PRODUCT_IDS :
+      QXO_ACCESSORY_PRODUCT_KEYS
 
     const result: Record<string, BrandPackage | ProposalLineItem[]> = {}
 
     // ── Universal accessories (fetched once, same for every brand) ───────────
+    // Base map — curated accessoryIds for the source. For SRS, primary_item
+    // breaks ties when multiple products land in the same component slot.
+    // For ABC/QXO no primary_item column — first match wins.
+    const universalSelect = cfg.source === 'srs'
+      ? `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item`
+      : `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price`
     const { data: universalProducts } = await supabase
-      .from('srs_products')
-      .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item')
-      .in('product_id', ACCESSORY_PRODUCT_IDS)
-      .limit(30)
+      .from(cfg.tables.products)
+      .select(universalSelect)
+      .in(cfg.cols.productPk, accessoryIds as never[])
+      .limit(50)
 
     const universalMap: Record<string, ProposalLineItem> = {}
-    for (const p of universalProducts ?? []) {
-      const comp = normalizeCategory(p.proposal_line_item, p.product_category)
+    for (const p of (universalProducts ?? []) as unknown as Array<Record<string, unknown>>) {
+      const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
       if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
-      if (!universalMap[comp] || p.primary_item)
-        universalMap[comp] = { product_id: p.product_id, product_name: p.product_name, proposal_line_item: comp, formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null, suggested_price: p.suggested_price, family_tier: null }
+      const isPrimary = cfg.source === 'srs' && p.primary_item === true
+      if (!universalMap[comp] || isPrimary)
+        universalMap[comp] = {
+          product_id: p[cfg.cols.productPk] as number | string,
+          product_name: p.product_name as string,
+          proposal_line_item: comp,
+          formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
+          suggested_price: p.suggested_price as number | null,
+          family_tier: null,
+        }
+    }
+
+    // ── Per-tier universal maps (Good/Better/Best differentiation) ───────────
+    // SRS uses one curated accessory list across all tiers (per v2 user choice).
+    // ABC and QXO leverage the accessory_tier column to pick cheaper-per-tier
+    // accessories for Good and more-premium for Best. Falls back to the base
+    // universalMap if no accessory_tier match exists for a given slot.
+    const universalMapByTier: Record<ProposalTier, Record<string, ProposalLineItem>> = {
+      good:   { ...universalMap },
+      better: { ...universalMap },
+      best:   { ...universalMap },
+    }
+    if (cfg.source !== 'srs') {
+      for (const tier of ['good', 'better', 'best'] as const) {
+        const accessoryTier = ACCESSORY_TIER_BY_PROPOSAL[tier]
+        // Best tier picks the most expensive within the band; Good picks the
+        // cheapest; Better picks the cheapest in the better band (middle).
+        const ascending = tier !== 'best'
+        const { data: tierAccessories } = await supabase
+          .from(cfg.tables.products)
+          .select(`${cfg.cols.productPk}, product_name, product_category, proposal_line_item, suggested_price`)
+          .eq('accessory_tier', accessoryTier)
+          .in('proposal_line_item', UNIVERSAL_COMPONENTS)
+          .order('suggested_price', { ascending, nullsFirst: false })
+          .limit(500)
+
+        for (const p of (tierAccessories ?? []) as Array<Record<string, unknown>>) {
+          const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
+          if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
+          // Only set if not already populated — first match wins (which is the
+          // cheapest/most-expensive depending on tier per the order above).
+          if (!universalMapByTier[tier][comp] || universalMapByTier[tier][comp] === universalMap[comp]) {
+            universalMapByTier[tier][comp] = {
+              product_id: p[cfg.cols.productPk] as number | string,
+              product_name: p.product_name as string,
+              proposal_line_item: comp,
+              formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
+              suggested_price: p.suggested_price as number | null,
+              family_tier: null,
+            }
+          }
+        }
+      }
     }
 
     // ── Roofing G/B/B packages ────────────────────────────────────────────────
     if (selectedTrades.includes('roofing')) {
+      const brandSelect = cfg.source === 'srs'
+        ? `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, product_line`
+        : `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, product_line`
+
       for (const brand of selectedBrands) {
         const allowedLines = selectedProductLines[brand] ?? []
 
         // Resolve brand-specific accessory upgrades for Better / Best tiers.
         // Most brands have no rules → empty map → no-op.
-        const tierOverrides = await resolveTierOverrides(rulesForBrand(brand))
+        const tierOverrides = await resolveTierOverrides(cfg, rulesForBrand(brand))
 
         const query = supabase
-          .from('srs_products')
-          .select('product_id, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, product_line')
-          .eq('manufacturer_norm', brand)
+          .from(cfg.tables.products)
+          .select(brandSelect)
+          .eq(cfg.cols.brand, brand)
           .eq('exclude_default', false)
-          .in('product_category', CPQ_CATEGORIES)
+          .in(cfg.cols.category, CPQ_CATEGORIES)
 
         if (allowedLines.length > 0) query.in('product_line', allowedLines)
 
-        const { data: brandProducts } = await query.limit(500)
+        const { data: brandProducts } = await query.limit(500) as unknown as { data: Array<Record<string, unknown>> | null }
         if (!brandProducts?.length) continue
 
         const shingleTiers = new Set(
           brandProducts.filter(p => p.product_category === 'SHINGLES' || p.proposal_line_item === 'Shingles')
-            .map(p => p.family_tier).filter(Boolean)
+            .map(p => p.family_tier as string | null).filter(Boolean) as string[]
         )
         if (shingleTiers.size < 2) continue
 
         const byCompTier: Record<string, Record<string, ProposalLineItem[]>> = {}
         for (const p of brandProducts) {
-          const comp = normalizeCategory(p.proposal_line_item, p.product_category)
+          const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
           if (!CPQ_COMPONENTS.includes(comp)) continue
-          const tier = p.family_tier ?? 'null'
+          const tier = (p.family_tier as string | null) ?? 'null'
           if (!byCompTier[comp]) byCompTier[comp] = {}
           if (!byCompTier[comp][tier]) byCompTier[comp][tier] = []
-          byCompTier[comp][tier].push({ product_id: p.product_id, product_name: p.product_name, proposal_line_item: comp, formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null, suggested_price: p.suggested_price, family_tier: p.family_tier })
-          if (p.primary_item) { const arr = byCompTier[comp][tier]; arr.unshift(arr.pop()!) }
+          byCompTier[comp][tier].push({
+            product_id: p[cfg.cols.productPk] as number | string,
+            product_name: p.product_name as string,
+            proposal_line_item: comp,
+            formula_key: ITEM_TO_FORMULA_KEY[comp] ?? null,
+            suggested_price: p.suggested_price as number | null,
+            family_tier: p.family_tier as string | null,
+          })
+          // Bubble the curated flagship to the front of its tier list.
+          // SRS uses the primary_item DB column; ABC/QXO use the JS isFlagship
+          // helper that intersects product_line with FLAGSHIP_PATTERNS.
+          const isDefault = cfg.source === 'srs'
+            ? p.primary_item === true
+            : isFlagship(cfg.source, brand, p.product_line as string | null)
+          if (isDefault) { const arr = byCompTier[comp][tier]; arr.unshift(arr.pop()!) }
         }
 
         const buildPackage = (tierName: ProposalTier, shingleTiers: string[], accessoryTiers: string[]): ProposalLineItem[] => {
           const overrides = tierOverrides.get(tierName) ?? {}
+          const tierUniversal = universalMapByTier[tierName]
           const lines: ProposalLineItem[] = []
           const shingles = pickProduct(byCompTier['Shingles'] ?? {}, shingleTiers)
           if (shingles) lines.push(shingles)
@@ -177,13 +259,13 @@ export async function POST(req: NextRequest) {
             }
           }
           for (const comp of ['Box Vent', 'Ridge Vent']) {
-            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better']) ?? universalMap[comp] ?? null
+            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better']) ?? tierUniversal[comp] ?? null
             if (item) { lines.push(item); break }
           }
           for (const comp of UNIVERSAL_COMPONENTS) {
             // Skip components already pushed above (starter/ice-water handled separately).
             if (comp === 'Starter Strip' || comp === 'Ice & Water — Standard') continue
-            const item = overrides[comp] ?? universalMap[comp]
+            const item = overrides[comp] ?? tierUniversal[comp]
             if (item) lines.push(item)
           }
           return lines
@@ -205,21 +287,25 @@ export async function POST(req: NextRequest) {
       for (const itemLabel of GUTTER_PROPOSAL_ITEMS) {
         for (const brand of selectedGutterBrands) {
           const allowedLines = selectedGutterProductLines[brand] ?? []
-          const q = supabase
-            .from('srs_products')
-            .select('product_id, product_name, proposal_line_item, suggested_price')
-            .eq('manufacturer_norm', brand)
+          let q: any = supabase
+            .from(cfg.tables.products)
+            .select(`${cfg.cols.productPk}, product_name, proposal_line_item, suggested_price`)
+            .eq(cfg.cols.brand, brand)
             .eq('proposal_line_item', itemLabel)
             .eq('exclude_default', false)
 
-          if (allowedLines.length > 0) q.in('product_line', allowedLines)
+          if (allowedLines.length > 0) q = q.in('product_line', allowedLines)
 
-          const { data } = await q.order('primary_item', { ascending: false }).limit(1)
+          // SRS uses primary_item; ABC/QXO order by cheapest as default pick.
+          q = cfg.source === 'srs'
+            ? q.order('primary_item', { ascending: false })
+            : q.order('suggested_price', { ascending: true, nullsFirst: false })
+          const { data } = await q.limit(1)
           const p = data?.[0]
           if (p && !seen.has(itemLabel)) {
             seen.add(itemLabel)
             gutterItems.push({
-              product_id: p.product_id, product_name: p.product_name,
+              product_id: p[cfg.cols.productPk], product_name: p.product_name,
               proposal_line_item: itemLabel, formula_key: ITEM_TO_FORMULA_KEY[itemLabel] ?? null,
               suggested_price: p.suggested_price, family_tier: null,
             })
@@ -236,20 +322,23 @@ export async function POST(req: NextRequest) {
 
       for (const brand of selectedSidingBrands) {
         const allowedLines = selectedSidingProductLines[brand] ?? []
-        const q = supabase
-          .from('srs_products')
-          .select('product_id, product_name, proposal_line_item, suggested_price')
-          .eq('manufacturer_norm', brand)
+        let q: any = supabase
+          .from(cfg.tables.products)
+          .select(`${cfg.cols.productPk}, product_name, proposal_line_item, suggested_price`)
+          .eq(cfg.cols.brand, brand)
           .eq('proposal_line_item', 'Siding')
           .eq('exclude_default', false)
 
-        if (allowedLines.length > 0) q.in('product_line', allowedLines)
+        if (allowedLines.length > 0) q = q.in('product_line', allowedLines)
 
-        const { data } = await q.order('primary_item', { ascending: false }).limit(1)
+        q = cfg.source === 'srs'
+          ? q.order('primary_item', { ascending: false })
+          : q.order('suggested_price', { ascending: true, nullsFirst: false })
+        const { data } = await q.limit(1)
         const p = data?.[0]
         if (p) {
           sidingItems.push({
-            product_id: p.product_id, product_name: p.product_name,
+            product_id: p[cfg.cols.productPk], product_name: p.product_name,
             proposal_line_item: 'Siding', formula_key: ITEM_TO_FORMULA_KEY['Siding'] ?? null,
             suggested_price: p.suggested_price, family_tier: null,
           })

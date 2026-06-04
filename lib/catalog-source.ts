@@ -190,6 +190,21 @@ export async function getStockedProductKeys(
 export const QXO_BIG3 = new Set(['Gaf', 'Certainteed', 'Owens Corning'])
 
 /**
+ * Maps a proposal tier (Good/Better/Best) to the matching `accessory_tier`
+ * value in the catalog. Used to differentiate accessories per tier on ABC
+ * and QXO — Good package picks cheapest-in-quartile accessories,
+ * Best picks most-expensive-in-quartile, etc.
+ *
+ * SRS proposal-preview does NOT use this — SRS keeps the curated
+ * ACCESSORY_PRODUCT_IDS list, identical across tiers, per v2 user decision.
+ */
+export const ACCESSORY_TIER_BY_PROPOSAL: Record<'good'|'better'|'best', string> = {
+  good:   'good_accessory',
+  better: 'better_accessory',
+  best:   'best_accessory',
+}
+
+/**
  * Common gutter / siding category filters per source. SRS and ABC use the
  * same enum-style canonical category names (since ABC categories were
  * normalized to SRS canon by enrich-abc-category-norm.py). QXO uses
