@@ -162,10 +162,16 @@ export function Step10Proposals() {
         selectedTrades.includes('siding')  ? 'Siding'  : '',
       ].filter(Boolean).join(' + ')
 
+      // Tag the template name with the catalog source (SRS / ABC / QXO) so the
+      // same brand can have a template per source — Zuper rejects duplicate
+      // template_name values, which otherwise collides when a customer who
+      // already imported SRS re-runs the wizard for ABC.
+      const sourceLabel = catalogSource.toUpperCase()
+
       const names: Record<string, string> = {}
       const descs: Record<string, string> = {}
       brands.forEach(b => {
-        names[b] = `${b} ${tradeLabel} Proposal`
+        names[b] = `${b} ${tradeLabel} Proposal - ${sourceLabel}`
         descs[b] = `Good / Better / Best ${tradeLabel.toLowerCase()} package for ${b} products`
       })
       setTemplateNames(names)
