@@ -28,6 +28,15 @@ export async function POST(req: NextRequest) {
   const input: CreateInput = await req.json()
   const { baseUrl, apiKey, categoryUid, statusUid, layoutTemplateUid, formulaMap, productIdMap, serviceIdMap = {}, selectedTrades = ['roofing'], gutterItems, sidingItems, packages } = input
 
+  // ABC/QXO stamp Supabase text PKs (e.g. "PFam_3359303") onto line items, but the
+  // upload route keyed productIdMap by the digit-only form ("3359303") — the same
+  // value stamped into Zuper's product_id. Try the raw key (SRS numeric), then fall
+  // back to the digit-stripped form (ABC/QXO).
+  const resolveZuperProduct = (rawId: string | number): string | undefined => {
+    const key = String(rawId)
+    return productIdMap[key] ?? productIdMap[key.replace(/\D/g, '')]
+  }
+
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
@@ -71,6 +80,7 @@ export async function POST(req: NextRequest) {
       // ── Per-brand template creation ──────────────────────────────────────────
       for (const { brand, templateName, templateDescription, pkg } of packages) {
         if (streamClosed) break
+        let skippedItems = 0  // line items with no matching uploaded Zuper product
         try {
           emit({ brand, status: 'running', step: 'Creating template…' })
 
@@ -169,8 +179,8 @@ export async function POST(req: NextRequest) {
 
             // POST each product line item
             for (const item of items) {
-              const zuperProductUid = productIdMap[String(item.product_id)]
-              if (!zuperProductUid) continue
+              const zuperProductUid = resolveZuperProduct(item.product_id)
+              if (!zuperProductUid) { skippedItems++; continue }
 
               const formulaUid = item.formula_key ? liveFormulaMap[item.formula_key] : undefined
 
@@ -233,8 +243,8 @@ export async function POST(req: NextRequest) {
               emit({ brand, status: 'running', step: `Adding ${items.length} items to ${opt.option_name} — ${label}…` })
 
               for (const item of items) {
-                const zuperProductUid = productIdMap[String(item.product_id)]
-                if (!zuperProductUid) continue
+                const zuperProductUid = resolveZuperProduct(item.product_id)
+                if (!zuperProductUid) { skippedItems++; continue }
                 const formulaUid = item.formula_key ? liveFormulaMap[item.formula_key] : undefined
                 const itemRes = await fetchWithRetry(sectionUrl, {
                   method: 'POST',
@@ -311,7 +321,12 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          emit({ brand, status: 'done', step: `Template created` })
+          emit({
+            brand, status: 'done',
+            step: skippedItems > 0
+              ? `Template created (${skippedItems} line items skipped — no matching uploaded product)`
+              : `Template created`,
+          })
         } catch (e: unknown) {
           emit({ brand, status: 'error', message: (e as Error).message })
         }
