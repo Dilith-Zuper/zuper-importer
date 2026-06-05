@@ -155,6 +155,11 @@ export async function POST(req: NextRequest) {
           .select(`${cfg.cols.productPk}, product_name, product_category, proposal_line_item, suggested_price`)
           .eq('accessory_tier', accessoryTier)
           .in('proposal_line_item', UNIVERSAL_COMPONENTS)
+          // Only pick from the accessories the upload actually sent (same fixed list
+          // the base universalMap uses). Without this, the per-tier query selects
+          // cheaper/pricier family_ids from the whole catalog that were never uploaded,
+          // so create-proposals can't resolve them and skips the line item.
+          .in(cfg.cols.productPk, accessoryIds as never[])
           .order('suggested_price', { ascending, nullsFirst: false })
           .limit(500)
 

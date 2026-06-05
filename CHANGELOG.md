@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- ABC/QXO proposals no longer skip ~7 accessory line items per option. The per-tier accessory differentiation in `app/api/proposal-preview/route.ts` picked accessories by `accessory_tier` from the whole catalog, but only the fixed `ABC_ACCESSORY_PRODUCT_IDS` list is uploaded, so the per-tier picks weren't in Zuper and were skipped by create-proposals. The per-tier query is now constrained to the uploaded accessory set (`.in(productPk, accessoryIds)`), matching the base universal-accessory map. ABC/QXO accessories are now shared across Good/Better/Best (as SRS already is); restoring price tiering needs the accessory catalog expanded to multiple products per slot.
+
 ## [v0.6.0] - 2026-06-05
 
 ### Added
