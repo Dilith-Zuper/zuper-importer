@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-06-05
+
 ### Added
 - **G/B/B proposal templates now work for ABC + QXO (v2).** `app/api/proposal-preview/route.ts` was generalized from SRS-only to source-agnostic. The bail with `__unsupported` is gone for both ABC and QXO; the engine builds full Good/Better/Best packages per brand. Three structural changes:
   - **Table-agnostic queries** — every `srs_products` hardcoding now uses `cfg.tables.products` + `cfg.cols.productPk` + `cfg.cols.brand` + `cfg.cols.category`. Same code path runs for SRS, ABC, and QXO.
