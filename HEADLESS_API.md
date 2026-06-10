@@ -1,5 +1,10 @@
 # Headless API — drive the import from n8n (no UI)
 
+> **Quick start**: import `n8n-headless-import.workflow.json` (repo root) into
+> n8n — the 4 nodes below pre-wired, with a dry-run gate and the 422
+> proposal-config branch. Fill in the `REPLACE_WITH_*` values in the
+> "Import Config" node (move the secrets to n8n credentials for real use).
+
 Four JSON endpoints under `/api/headless/*` orchestrate the entire wizard:
 catalog discovery → plan (selection + validation) → import (products/services)
 → finalize (vendor catalog + G/B/B proposal templates). They self-call the

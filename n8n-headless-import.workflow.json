@@ -1,0 +1,215 @@
+{
+  "name": "Zuper Importer — Headless Catalog Import",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-660, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "f1", "name": "appUrl", "value": "https://zuper-importer.vercel.app", "type": "string" },
+            { "id": "f2", "name": "headlessKey", "value": "REPLACE_WITH_HEADLESS_API_KEY", "type": "string" },
+            { "id": "f3", "name": "companyLoginName", "value": "REPLACE_WITH_COMPANY_LOGIN", "type": "string" },
+            { "id": "f4", "name": "zuperApiKey", "value": "REPLACE_WITH_ZUPER_API_KEY", "type": "string" },
+            { "id": "f5", "name": "catalogSource", "value": "srs", "type": "string" },
+            { "id": "f6", "name": "brands", "value": "big3", "type": "string" },
+            { "id": "f7", "name": "extraBrands", "value": "[]", "type": "string" },
+            { "id": "f8", "name": "dryRun", "value": "false", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "name": "Import Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Import Config').item.json.appUrl }}/api/headless/plan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-headless-key", "value": "={{ $('Import Config').item.json.headlessKey }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companyLoginName: $('Import Config').item.json.companyLoginName, apiKey: $('Import Config').item.json.zuperApiKey, catalogSource: $('Import Config').item.json.catalogSource, trades: ['roofing'], brands: $('Import Config').item.json.brands, extraBrands: JSON.parse($('Import Config').item.json.extraBrands), productLines: 'all', dryRun: $('Import Config').item.json.dryRun === 'true' }) }}",
+        "options": { "timeout": 300000 }
+      },
+      "id": "a1000000-0000-0000-0000-000000000003",
+      "name": "1. Plan + Validate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.dryRun }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000004",
+      "name": "Dry Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-0000-0000-000000000005",
+      "name": "Dry Run Result (stop here)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [220, -140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Import Config').item.json.appUrl }}/api/headless/import",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-headless-key", "value": "={{ $('Import Config').item.json.headlessKey }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ apiKey: $('Import Config').item.json.zuperApiKey, state: $json.state }) }}",
+        "options": { "timeout": 300000 }
+      },
+      "id": "a1000000-0000-0000-0000-000000000006",
+      "name": "2. Import Products + Services",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Import Config').item.json.appUrl }}/api/headless/finalize",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-headless-key", "value": "={{ $('Import Config').item.json.headlessKey }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ apiKey: $('Import Config').item.json.zuperApiKey, state: $json.state, options: { vendor: true, proposals: true } }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": { "response": { "fullResponse": true, "neverError": true } }
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000007",
+      "name": "3. Finalize (Vendor + Proposals)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 422,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000008",
+      "name": "Needs Proposal Config?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-0000-0000-000000000009",
+      "name": "Manual Pick Needed (notify a human)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [880, -20]
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-0000-0000-00000000000a",
+      "name": "Import Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "content": "## Setup\n1. Replace the four REPLACE_WITH_* values in **Import Config** (better: move headlessKey + zuperApiKey to n8n credentials / env).\n2. `headlessKey` must match the HEADLESS_API_KEY env var on the Vercel deployment.\n3. For QXO: set catalogSource to `qxo` and add a `branchNum` field to Import Config + the Plan body (list branches via GET /api/qxo-branches).\n4. First run: set dryRun = `true` — Plan returns the resolved brands + product counts and stops before any Zuper write.\n\nFull reference: HEADLESS_API.md in the repo.",
+        "height": 320,
+        "width": 400
+      },
+      "id": "a1000000-0000-0000-0000-00000000000b",
+      "name": "Sticky Note — Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-680, -420]
+    },
+    {
+      "parameters": {
+        "content": "## 422 branch\nFinalize returns **422 needs:'proposal_config'** when the Zuper account's job category / status / proposal layout can't be auto-detected. The response body lists categoryOptions / statusOptions / layoutOptions.\n\nReplace the *Manual Pick Needed* NoOp with your notification (Slack/email), then re-run Finalize with:\n```\noptions: { proposalConfig: { categoryUid, statusUid, layoutUid } }\n```\nEverything is idempotent — re-running Import updates instead of duplicating; re-running Finalize dedupes the vendor and reports existing templates as per-brand errors.",
+        "height": 320,
+        "width": 400
+      },
+      "id": "a1000000-0000-0000-0000-00000000000c",
+      "name": "Sticky Note — 422 branch",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [600, -420]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Import Config", "type": "main", "index": 0 }]] },
+    "Import Config": { "main": [[{ "node": "1. Plan + Validate", "type": "main", "index": 0 }]] },
+    "1. Plan + Validate": { "main": [[{ "node": "Dry Run?", "type": "main", "index": 0 }]] },
+    "Dry Run?": {
+      "main": [
+        [{ "node": "Dry Run Result (stop here)", "type": "main", "index": 0 }],
+        [{ "node": "2. Import Products + Services", "type": "main", "index": 0 }]
+      ]
+    },
+    "2. Import Products + Services": { "main": [[{ "node": "3. Finalize (Vendor + Proposals)", "type": "main", "index": 0 }]] },
+    "3. Finalize (Vendor + Proposals)": { "main": [[{ "node": "Needs Proposal Config?", "type": "main", "index": 0 }]] },
+    "Needs Proposal Config?": {
+      "main": [
+        [{ "node": "Manual Pick Needed (notify a human)", "type": "main", "index": 0 }],
+        [{ "node": "Import Complete", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}
