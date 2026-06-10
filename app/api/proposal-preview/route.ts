@@ -109,14 +109,18 @@ export async function POST(req: NextRequest) {
     // Base map — curated accessoryIds for the source. For SRS, primary_item
     // breaks ties when multiple products land in the same component slot.
     // For ABC/QXO no primary_item column — first match wins.
+    // qxo_products has no product_category column — alias the source's category
+    // column (category_norm for QXO) so downstream p.product_category reads work.
+    // No-op for SRS/ABC where cfg.cols.category is already product_category.
     const universalSelect = cfg.source === 'srs'
       ? `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item`
-      : `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price`
-    const { data: universalProducts } = await supabase
+      : `${cfg.cols.productPk}, product_name, product_category:${cfg.cols.category}, proposal_line_item, family_tier, suggested_price`
+    const { data: universalProducts, error: universalError } = await supabase
       .from(cfg.tables.products)
       .select(universalSelect)
       .in(cfg.cols.productPk, accessoryIds as never[])
       .limit(50)
+    if (universalError) console.error('[proposal-preview] universal accessories query failed:', universalError.message)
 
     const universalMap: Record<string, ProposalLineItem> = {}
     for (const p of (universalProducts ?? []) as unknown as Array<Record<string, unknown>>) {
@@ -150,9 +154,9 @@ export async function POST(req: NextRequest) {
         // Best tier picks the most expensive within the band; Good picks the
         // cheapest; Better picks the cheapest in the better band (middle).
         const ascending = tier !== 'best'
-        const { data: tierAccessories } = await supabase
+        const { data: tierAccessories, error: tierError } = await supabase
           .from(cfg.tables.products)
-          .select(`${cfg.cols.productPk}, product_name, product_category, proposal_line_item, suggested_price`)
+          .select(`${cfg.cols.productPk}, product_name, product_category:${cfg.cols.category}, proposal_line_item, suggested_price`)
           .eq('accessory_tier', accessoryTier)
           .in('proposal_line_item', UNIVERSAL_COMPONENTS)
           // Only pick from the accessories the upload actually sent (same fixed list
@@ -162,6 +166,7 @@ export async function POST(req: NextRequest) {
           .in(cfg.cols.productPk, accessoryIds as never[])
           .order('suggested_price', { ascending, nullsFirst: false })
           .limit(500)
+        if (tierError) console.error(`[proposal-preview] ${tier}-tier accessories query failed:`, tierError.message)
 
         for (const p of (tierAccessories ?? []) as Array<Record<string, unknown>>) {
           const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
@@ -186,7 +191,7 @@ export async function POST(req: NextRequest) {
     if (selectedTrades.includes('roofing')) {
       const brandSelect = cfg.source === 'srs'
         ? `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, primary_item, product_line`
-        : `${cfg.cols.productPk}, product_name, product_category, proposal_line_item, family_tier, suggested_price, product_line`
+        : `${cfg.cols.productPk}, product_name, product_category:${cfg.cols.category}, proposal_line_item, family_tier, suggested_price, product_line`
 
       for (const brand of selectedBrands) {
         const allowedLines = selectedProductLines[brand] ?? []
@@ -200,11 +205,16 @@ export async function POST(req: NextRequest) {
           .select(brandSelect)
           .eq(cfg.cols.brand, brand)
           .eq('exclude_default', false)
-          .in(cfg.cols.category, CPQ_CATEGORIES)
+
+        // SRS/ABC: canonical enum categories. QXO: category_norm is free text,
+        // so CPQ membership is determined by proposal_line_item instead.
+        if (cfg.source === 'qxo') query.in('proposal_line_item', CPQ_COMPONENTS)
+        else query.in(cfg.cols.category, CPQ_CATEGORIES)
 
         if (allowedLines.length > 0) query.in('product_line', allowedLines)
 
-        const { data: brandProducts } = await query.limit(500) as unknown as { data: Array<Record<string, unknown>> | null }
+        const { data: brandProducts, error: brandError } = await query.limit(500) as unknown as { data: Array<Record<string, unknown>> | null, error: { message: string } | null }
+        if (brandError) { console.error(`[proposal-preview] roofing query failed for brand ${brand}:`, brandError.message); continue }
         if (!brandProducts?.length) continue
 
         const shingleTiers = new Set(
