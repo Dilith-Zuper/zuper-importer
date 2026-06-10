@@ -76,6 +76,7 @@ export function Step9Proposals() {
   const [layoutOptions, setLayoutOptions]     = useState<{ uid: string; name: string }[]>([])
 
   const [packageLoading, setPackageLoading] = useState(false)
+  const [skippedBrands, setSkippedBrands]   = useState<{ brand: string; reason: string }[]>([])
   const [templateNames, setTemplateNames]   = useState<Record<string, string>>({})
   const [templateDescs, setTemplateDescs]   = useState<Record<string, string>>({})
   const [activeBrands, setActiveBrands]     = useState<Set<string>>(new Set())
@@ -132,7 +133,8 @@ export function Step9Proposals() {
     if (!d.error) {
       const gutters: ProposalLineItem[] = d.__gutters ?? []
       const siding:  ProposalLineItem[] = d.__siding  ?? []
-      delete d.__gutters; delete d.__siding; delete d.error
+      setSkippedBrands(d.__skipped ?? [])
+      delete d.__gutters; delete d.__siding; delete d.__skipped; delete d.error
       const packages = d as Record<string, BrandPackage>
 
       setProposalPackages(packages)
@@ -271,9 +273,22 @@ export function Step9Proposals() {
           {packageLoading ? (
             <div className="flex items-center gap-3 text-gray-500 text-sm"><Spinner /> Loading packages…</div>
           ) : eligibleBrands.length === 0 ? (
-            <p className="text-gray-500 text-sm">No eligible roofing brands found within selected product lines.</p>
+            <div className="space-y-2">
+              <p className="text-gray-500 text-sm">No eligible roofing brands found within selected product lines.</p>
+              {skippedBrands.map(s => (
+                <p key={s.brand} className="text-sm text-amber-700"><span className="font-semibold">{s.brand}</span> — {s.reason}</p>
+              ))}
+            </div>
           ) : (
             <>
+              {/* Per-brand skip notices (some brands eligible, some not) */}
+              {skippedBrands.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+                  {skippedBrands.map(s => (
+                    <p key={s.brand} className="text-sm text-amber-800"><span className="font-semibold">{s.brand}</span> skipped — {s.reason}</p>
+                  ))}
+                </div>
+              )}
               {/* Brand filter pills */}
               <div className="flex flex-wrap gap-2">
                 {eligibleBrands.map(b => (

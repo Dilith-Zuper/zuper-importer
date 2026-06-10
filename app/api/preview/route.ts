@@ -78,14 +78,19 @@ export async function POST(req: NextRequest) {
         ? 'product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price'
         : 'product_key, product_name, category_norm, brand_norm, product_line, family_tier, proposal_line_item, suggested_price'
 
+      // PostgREST parses unquoted in.() values on commas/parens — a brand name
+      // containing either would silently corrupt the filter. Double-quote each
+      // value (no such brands exist today; this is hardening).
+      const quotedBrands = brands.map(b => `"${b.replace(/"/g, '\\"')}"`).join(',')
+
       const buildQuery = (pageStart: number, pageEnd: number) => {
         let q: any = supabase.from(cfg.tables.products).select(SELECT).eq('exclude_default', false)
         if (cfg.source !== 'qxo') {
           // SRS + ABC: same column shape. Roofing: brands OR universal manufacturer-varies items.
           if (trade === 'roofing') {
-            q = q.or(`manufacturer_norm.in.(${brands.join(',')}),and(is_universal.eq.true,manufacturer_norm.ilike.%manufacturer varies%)`)
+            q = q.or(`manufacturer_norm.in.(${quotedBrands}),and(is_universal.eq.true,manufacturer_norm.ilike.%manufacturer varies%)`)
           } else if (trade === 'gutters') {
-            q = q.or(`manufacturer_norm.in.(${brands.join(',')}),and(is_universal.eq.true,manufacturer_norm.ilike.%manufacturer varies%)`)
+            q = q.or(`manufacturer_norm.in.(${quotedBrands}),and(is_universal.eq.true,manufacturer_norm.ilike.%manufacturer varies%)`)
               .eq('product_category', SRS_TRADE_CATEGORY[trade])
           } else { // siding
             q = q.in('manufacturer_norm', brands).eq('product_category', SRS_TRADE_CATEGORY[trade])
@@ -131,26 +136,29 @@ export async function POST(req: NextRequest) {
 
     // ── Fetch universal accessory products ─────────────────────────────────
     if (cfg.source === 'srs') {
-      const { data: accessories } = await supabase
+      const { data: accessories, error: accError } = await supabase
         .from('srs_products')
         .select('product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price')
         .in('product_id', ACCESSORY_PRODUCT_IDS)
+      if (accError) throw new Error(`accessory fetch failed: ${accError.message}`)
       for (const r of (accessories ?? []) as Record<string, unknown>[]) {
         allProducts.push(toPreviewRow(r, 'srs'))
       }
     } else if (cfg.source === 'abc' && ABC_ACCESSORY_PRODUCT_IDS.length > 0) {
-      const { data: accessories } = await supabase
+      const { data: accessories, error: accError } = await supabase
         .from('abc_products')
         .select('product_id, product_name, product_category, manufacturer_norm, product_line, family_tier, proposal_line_item, suggested_price')
         .in('product_id', ABC_ACCESSORY_PRODUCT_IDS)
+      if (accError) throw new Error(`accessory fetch failed: ${accError.message}`)
       for (const r of (accessories ?? []) as Record<string, unknown>[]) {
         allProducts.push(toPreviewRow(r, 'abc'))
       }
     } else if (QXO_ACCESSORY_PRODUCT_KEYS.length > 0) {
-      const { data: accessories } = await supabase
+      const { data: accessories, error: accError } = await supabase
         .from('qxo_products')
         .select('product_key, product_name, category_norm, brand_norm, product_line, family_tier, proposal_line_item, suggested_price')
         .in('product_key', QXO_ACCESSORY_PRODUCT_KEYS)
+      if (accError) throw new Error(`accessory fetch failed: ${accError.message}`)
       for (const r of (accessories ?? []) as Record<string, unknown>[]) {
         allProducts.push(toPreviewRow(r, 'qxo'))
       }

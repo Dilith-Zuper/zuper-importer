@@ -35,9 +35,15 @@ export const FLAGSHIP_PATTERNS: Record<CatalogSource, Record<string, RegExp[]>> 
     'Owens Corning': [/\b(duration|oakridge|trudefinition)\b/i],
   },
   qxo: {
-    // QXO patterns — populated as a v2.1 follow-up once QXO product_line
-    // patterns are spot-checked. Engine falls back to natural ordering for
-    // any brand without a pattern here.
+    // Spot-checked against live qxo_products.product_line (2026-06-10):
+    // strings carry ®/™ marks ("Timberline HDZ™", "Landmark® PRO",
+    // "TruDefinition® Duration® Shingles") but the symbols sit on word
+    // boundaries, so the ABC patterns match unchanged. "Timberline Ultra HD"
+    // (a better-tier line) correctly does NOT match — "ultra" breaks the
+    // \s+ between Timberline and HD.
+    'Gaf': [/timberline\s+(hd|hdz|uhdz|natural\s+shadow)\b/i],
+    'Certainteed': [/\blandmark\b/i],
+    'Owens Corning': [/\b(duration|oakridge|trudefinition)\b/i],
   },
 }
 

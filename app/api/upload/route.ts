@@ -294,7 +294,12 @@ export async function POST(req: NextRequest) {
           const median = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
           for (const [k, arr] of Object.entries(byCT)) priceFallback.byCategoryTier[k] = median(arr)
           for (const [k, arr] of Object.entries(byC))  priceFallback.byCategory[k] = median(arr)
-        } catch { /* non-fatal — uploaded prices land at 0 */ }
+        } catch (e) {
+          // Non-fatal, but without the fallback map unpriced products land at
+          // $0 in Zuper — tell the CSM instead of failing silently.
+          console.error('[upload] price-fallback computation failed:', (e as Error).message)
+          emit({ type: 'warning', message: 'Price fallback data could not be loaded — products without a catalog price will upload at $0. Re-check prices in Zuper after upload.' })
+        }
 
         // Group variants by product
         const variantsByProduct = new Map<number, SrsVariant[]>()
@@ -461,6 +466,7 @@ export async function POST(req: NextRequest) {
         // (15) since we're no longer fighting the batch-pacing budget.
         if (allNeedGet.length > 0 && !streamClosed) {
           emit({ type: 'color_gets_start', count: allNeedGet.length })
+          let colorGetFailures = 0
           await mapWithLimit(allNeedGet, OPTION_GET_CONCURRENCY, async ({ srsId, zuperUid, product }) => {
             try {
               const getRes = await fetchWithRetry(`${baseUrl}product/${zuperUid}`, {
@@ -477,8 +483,15 @@ export async function POST(req: NextRequest) {
                   purchase_price: product.purchase_price,
                 }))
               }
-            } catch { /* non-fatal — product is uploaded, vendor catalog skips this one */ }
+            } catch {
+              // Non-fatal — product is uploaded, but the vendor catalog loses
+              // this product's SKU↔color mappings. Counted + surfaced below.
+              colorGetFailures++
+            }
           })
+          if (colorGetFailures > 0) {
+            emit({ type: 'warning', message: `${colorGetFailures} product(s) failed the color-option lookup — their SKU↔color mappings will be missing from the vendor catalog. Re-run the vendor catalog step to retry.` })
+          }
         }
 
         timing.color_gets = phaseEnd(tColor)

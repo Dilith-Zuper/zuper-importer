@@ -20,6 +20,18 @@ const UNIVERSAL_COMPONENTS = [
   'Ridge Vent',  // Lomanco vents from accessory catalog — fallback when brand has no ridge vent
 ]
 
+// Components allowed into the universal maps. Superset of UNIVERSAL_COMPONENTS:
+// these slots prefer the brand's own product but fall back to the curated
+// universal item when the brand has none. QXO/ABC accessory catalogs curate
+// Ice & Water + underlayment + box vent products that were previously filtered
+// out here, so e.g. QXO Gaf proposals shipped with no ice & water at all.
+const MAP_COMPONENTS = [
+  ...UNIVERSAL_COMPONENTS,
+  'Underlayment — Synthetic', 'Underlayment — Felt 30#',
+  'Ice & Water — Standard', 'Ice & Water — High Temp',
+  'Box Vent',
+]
+
 // Curated gutter proposal line items (all have CPQ formulas)
 const GUTTER_PROPOSAL_ITEMS = [
   'Gutter Sections', 'Downspouts', 'Gutter Elbows',
@@ -119,13 +131,14 @@ export async function POST(req: NextRequest) {
       .from(cfg.tables.products)
       .select(universalSelect)
       .in(cfg.cols.productPk, accessoryIds as never[])
-      .limit(50)
+      // Curated catalogs are 13-21 ids today; 200 leaves headroom without paging.
+      .limit(200)
     if (universalError) console.error('[proposal-preview] universal accessories query failed:', universalError.message)
 
     const universalMap: Record<string, ProposalLineItem> = {}
     for (const p of (universalProducts ?? []) as unknown as Array<Record<string, unknown>>) {
       const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
-      if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
+      if (!MAP_COMPONENTS.includes(comp)) continue
       const isPrimary = cfg.source === 'srs' && p.primary_item === true
       if (!universalMap[comp] || isPrimary)
         universalMap[comp] = {
@@ -158,7 +171,7 @@ export async function POST(req: NextRequest) {
           .from(cfg.tables.products)
           .select(`${cfg.cols.productPk}, product_name, product_category:${cfg.cols.category}, proposal_line_item, suggested_price`)
           .eq('accessory_tier', accessoryTier)
-          .in('proposal_line_item', UNIVERSAL_COMPONENTS)
+          .in('proposal_line_item', MAP_COMPONENTS)
           // Only pick from the accessories the upload actually sent (same fixed list
           // the base universalMap uses). Without this, the per-tier query selects
           // cheaper/pricier family_ids from the whole catalog that were never uploaded,
@@ -170,7 +183,7 @@ export async function POST(req: NextRequest) {
 
         for (const p of (tierAccessories ?? []) as Array<Record<string, unknown>>) {
           const comp = normalizeCategory(p.proposal_line_item as string, p.product_category as string)
-          if (!UNIVERSAL_COMPONENTS.includes(comp)) continue
+          if (!MAP_COMPONENTS.includes(comp)) continue
           // Only set if not already populated — first match wins (which is the
           // cheapest/most-expensive depending on tier per the order above).
           if (!universalMapByTier[tier][comp] || universalMapByTier[tier][comp] === universalMap[comp]) {
@@ -186,6 +199,10 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    // Per-brand skip reasons — surfaced in the UI so CSMs learn WHY a brand
+    // produced no packages instead of a generic "no eligible brands" message.
+    const skipped: Array<{ brand: string; reason: string }> = []
 
     // ── Roofing G/B/B packages ────────────────────────────────────────────────
     if (selectedTrades.includes('roofing')) {
@@ -213,15 +230,31 @@ export async function POST(req: NextRequest) {
 
         if (allowedLines.length > 0) query.in('product_line', allowedLines)
 
-        const { data: brandProducts, error: brandError } = await query.limit(500) as unknown as { data: Array<Record<string, unknown>> | null, error: { message: string } | null }
-        if (brandError) { console.error(`[proposal-preview] roofing query failed for brand ${brand}:`, brandError.message); continue }
-        if (!brandProducts?.length) continue
+        // Largest brand today is ~199 CPQ rows (ABC Certainteed); 1000 = headroom.
+        const { data: brandProducts, error: brandError } = await query.limit(1000) as unknown as { data: Array<Record<string, unknown>> | null, error: { message: string } | null }
+        if (brandError) {
+          console.error(`[proposal-preview] roofing query failed for brand ${brand}:`, brandError.message)
+          skipped.push({ brand, reason: 'catalog query failed — try again or contact support' })
+          continue
+        }
+        if (!brandProducts?.length) {
+          skipped.push({ brand, reason: 'no roofing products found within the selected product lines' })
+          continue
+        }
 
         const shingleTiers = new Set(
           brandProducts.filter(p => p.product_category === 'SHINGLES' || p.proposal_line_item === 'Shingles')
             .map(p => p.family_tier as string | null).filter(Boolean) as string[]
         )
-        if (shingleTiers.size < 2) continue
+        if (shingleTiers.size < 2) {
+          skipped.push({
+            brand,
+            reason: shingleTiers.size === 0
+              ? 'no shingle products within the selected product lines'
+              : 'only one shingle tier within the selected product lines — Good/Better/Best needs at least two',
+          })
+          continue
+        }
 
         const byCompTier: Record<string, Record<string, ProposalLineItem[]>> = {}
         for (const p of brandProducts) {
@@ -259,19 +292,29 @@ export async function POST(req: NextRequest) {
           const starter = overrides['Starter Strip']
             ?? pickProduct(byCompTier['Starter Strip'] ?? {}, accessoryTiers)
           if (starter) lines.push(starter)
+          // Underlayment — brand product preferred; fall back to the curated
+          // universal item so no proposal ships without underlayment.
+          let underlayment: ProposalLineItem | null = null
           for (const comp of ['Underlayment — Synthetic', 'Underlayment — Felt 30#']) {
-            const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
-            if (item) { lines.push(item); break }
+            underlayment = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
+            if (underlayment) break
           }
+          underlayment ??= tierUniversal['Underlayment — Synthetic'] ?? tierUniversal['Underlayment — Felt 30#'] ?? null
+          if (underlayment) lines.push(underlayment)
           // Ice & Water — brand-specific upgrade may swap Standard for High Temp.
+          // Most QXO/ABC brands carry no I&W under their own name (it's a GCP /
+          // Henry / OC commodity), so fall back to the curated universal item.
           const iceWaterOverride = overrides['Ice & Water — Standard']
           if (iceWaterOverride) {
             lines.push(iceWaterOverride)
           } else {
+            let iceWater: ProposalLineItem | null = null
             for (const comp of ['Ice & Water — Standard', 'Ice & Water — High Temp']) {
-              const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
-              if (item) { lines.push(item); break }
+              iceWater = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better'])
+              if (iceWater) break
             }
+            iceWater ??= tierUniversal['Ice & Water — Standard'] ?? tierUniversal['Ice & Water — High Temp'] ?? null
+            if (iceWater) lines.push(iceWater)
           }
           for (const comp of ['Box Vent', 'Ridge Vent']) {
             const item = pickProduct(byCompTier[comp] ?? {}, ['good', 'addon', 'better']) ?? tierUniversal[comp] ?? null
@@ -361,6 +404,8 @@ export async function POST(req: NextRequest) {
       }
       result.__siding = sidingItems
     }
+
+    if (skipped.length > 0) (result as Record<string, unknown>).__skipped = skipped
 
     return NextResponse.json(result)
   } catch (e: unknown) {

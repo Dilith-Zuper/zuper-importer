@@ -18,6 +18,7 @@ export function Step6Upload() {
   const [log, setLog]                 = useState<LogEntry[]>([])
   const [done, setDone]               = useState(false)
   const [batchInfo, setBatchInfo]     = useState({ current: 0, total: 0 })
+  const [warnings, setWarnings]       = useState<string[]>([])
 
   // Phase 2 — services
   const [servicesTotal, setServicesTotal]       = useState(0)
@@ -78,6 +79,9 @@ export function Step6Upload() {
             if (data.type === 'service_progress') {
               setServicesUploaded(data.uploaded ?? 0)
             }
+            if (data.type === 'warning' && data.message) {
+              setWarnings(prev => [...prev, data.message])
+            }
             if (data.type === 'done') {
               setDone(true)
               setServicesDone(true)
@@ -115,6 +119,15 @@ export function Step6Upload() {
           Uploading to <span className="font-medium text-orange-500">{companyName}</span>
         </p>
       </div>
+
+      {/* ── Non-fatal warnings (price fallback, color lookups) ── */}
+      {warnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-sm text-amber-800">⚠ {w}</p>
+          ))}
+        </div>
+      )}
 
       {/* ── Phase 1: Products ── */}
       <div className="space-y-4">
