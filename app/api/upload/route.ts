@@ -8,6 +8,7 @@ import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
 import { QXO_ACCESSORY_PRODUCT_KEYS } from '@/lib/qxo-accessory-catalog'
 import { ABC_ACCESSORY_PRODUCT_IDS } from '@/lib/abc-accessory-catalog'
 import { mapWithLimit } from '@/lib/limit'
+import { UOM_MAP } from '@/lib/uom-map'
 import { catalogConfig } from '@/lib/catalog-source'
 import type { CatalogSource } from '@/types/wizard'
 
@@ -183,7 +184,7 @@ export async function POST(req: NextRequest) {
                 manufacturer:      (r.brand_raw as string) ?? null,
                 manufacturer_norm: (r.brand_norm as string) ?? null,
                 product_description: (r.description_short as string) ?? null,
-                product_uom:       null,                 // QXO has per-variant UOM only
+                product_uom:       null,                 // backfilled below from variant UOMs
                 product_image_url: (r.product_image_url as string) ?? null,
                 suggested_price:   r.suggested_price as number | null,
                 purchase_price:    null,
@@ -193,6 +194,15 @@ export async function POST(req: NextRequest) {
             }
           }
           // QXO variants — map variant_sku → variant_code (as string), color → color_name.
+          // QXO has no product-level UOM, so tally each product's variant UOMs and
+          // stamp the most common one onto the product below. Values are pipe-
+          // delimited packaging chains like "PLT|BDL" or "CTN|PC" — prefer the
+          // first segment with a Zuper mapping (BDL for shingles, not PLT).
+          const pickUomCode = (raw: string): string | null => {
+            const segs = raw.split('|').map(s => s.trim()).filter(Boolean)
+            return segs.find(s => UOM_MAP[s]) ?? segs[0] ?? null
+          }
+          const uomTally = new Map<number, Record<string, number>>()
           for (let from = 0; from < keys.length; from += 500) {
             const chunk = keys.slice(from, from + 500)
             const { data, error } = await supabase
@@ -201,9 +211,16 @@ export async function POST(req: NextRequest) {
               .in('product_key', chunk)
             if (error) throw new Error(error.message)
             for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+              const pid = Number(String(r.product_key).replace(/\D/g, '')) || 0
+              const uomCode = pickUomCode((r.uom as string) ?? '')
+              if (uomCode) {
+                const tally = uomTally.get(pid) ?? {}
+                tally[uomCode] = (tally[uomCode] ?? 0) + 1
+                uomTally.set(pid, tally)
+              }
               allVariants.push({
                 variant_id:        Number(r.variant_sku),
-                product_id:        Number(String(r.product_key).replace(/\D/g, '')) || 0,
+                product_id:        pid,
                 variant_code:      String(r.variant_sku),
                 color_name:        (r.color as string) ?? null,
                 size_name:         (r.uom as string) ?? null,    // size column unused for QXO; carry UOM here for vendor catalog
@@ -211,6 +228,10 @@ export async function POST(req: NextRequest) {
                 is_restricted:     false,
               })
             }
+          }
+          for (const p of allProducts) {
+            const tally = uomTally.get(p.product_id)
+            if (tally) p.product_uom = Object.entries(tally).sort((a, b) => b[1] - a[1])[0][0]
           }
         }
 
