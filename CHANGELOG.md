@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- SRS product UOM on upload: `toZuperUom()` now prefers `srs_products.order_uom` (new column — dominant order_uom across a product's variants, see product-importer) over `product_uom[0]`, which was frequently `PAL` and silently fell back to `EA`. Affected 38% of SRS products (e.g. items that should upload as `PC`/`RL`/`BX`/`BDL` were uploading as `EA`).
+- `lib/uom-map.ts` `UOM_MAP` expanded from 9 to 49 entries to cover the full set of SRS `order_uom` codes. `SF`→`SQFT` and `SHT`→`PC` are real corrections (100 products); the remaining ~40 codes (container/pack/kit/weight/volume units — `BAG`, `KIT`, `5G`, `LB`, `TON`, etc., ~2,700 products) are now explicit `EA` mappings — Zuper's 13-code roofing UOM list (`SQ, SQFT, LF, EA, PC, GAL, HR, BDL, PCT, RL, BX, PITCH, INCH`) has no closer equivalent, and mapping gallon/weight sizes to `GAL` would imply per-gallon pricing rather than per-container.
+
 ### Added
 - `n8n-headless-import.workflow.json` — importable n8n workflow template for the headless API: config node, plan→import→finalize pre-wired with the `x-headless-key` header and 300s timeouts, a dry-run gate, and the 422 `needs: proposal_config` branch stubbed for a human-notification node.
 - **Headless API layer** (`/api/headless/*`) — drive the entire import from n8n or any HTTP client, no UI: `catalog` (brand/line discovery), `plan` (resolve 'big3'/explicit selection + run validation, `dryRun` supported), `import` (products + services upload), `finalize` (vendor catalog + G/B/B proposal templates; 422 with options when proposal preflight needs a human pick). Thin orchestrators in `lib/headless.ts` self-fetch the existing routes and consume their SSE streams server-side — UI code paths untouched. All headless routes require the `x-headless-key` header matching the `HEADLESS_API_KEY` env var. Full n8n recipe in `HEADLESS_API.md`.

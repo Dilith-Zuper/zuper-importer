@@ -9,6 +9,8 @@ export interface SrsProduct {
   manufacturer_norm: string | null
   product_description: string | null
   product_uom: string | string[] | null
+  /** Dominant order_uom across the product's variants — preferred over product_uom[0] (see toZuperUom). */
+  order_uom?: string | null
   product_image_url: string | null
   suggested_price: number | null
   purchase_price: number | null
@@ -130,7 +132,7 @@ export function buildProductPayload(
     track_quantity: true,
     specification: '',
     has_custom_tax: false,
-    uom: toZuperUom(product.product_uom),
+    uom: toZuperUom(product.order_uom ?? product.product_uom),
     is_billable: true,
     consider_profitability: true,
     is_commissionable: true,

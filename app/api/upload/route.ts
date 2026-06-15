@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
             const chunk = ids.slice(from, from + PAGE)
             const { data, error } = await supabase
               .from('srs_products')
-              .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, product_image_url, suggested_price, purchase_price, proposal_line_item, family_tier')
+              .select('product_id, product_name, product_category, manufacturer, manufacturer_norm, product_description, product_uom, order_uom, product_image_url, suggested_price, purchase_price, proposal_line_item, family_tier')
               .in('product_id', chunk)
             if (error) throw new Error(error.message)
             allProducts.push(...(data as SrsProduct[]))
