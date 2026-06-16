@@ -23,6 +23,41 @@ const BATCH_PAUSE_MS = 500
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// PostgREST caps every response at 1000 rows. The product fetch is safe (one row
+// per id), but variant fetches are NOT — a 500-id chunk routinely holds several
+// thousand variants, so an un-paginated query silently drops everything past row
+// 1000 and the affected products upload with empty color/size options (looked like
+// "options missing on ~most products"). Page each id-chunk with .range(), ordered
+// by the variant PK (unique → deterministic, non-overlapping windows), until drained.
+async function fetchVariantRows(
+  table: string,
+  idColumn: string,
+  ids: (number | string)[],
+  select: string,
+  orderColumn: string,
+  restrictedFalse: boolean,
+): Promise<Array<Record<string, unknown>>> {
+  const PAGE = 1000
+  const rows: Array<Record<string, unknown>> = []
+  for (let from = 0; from < ids.length; from += 500) {
+    const chunk = ids.slice(from, from + 500)
+    let offset = 0
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const base = restrictedFalse
+        ? supabase.from(table).select(select).in(idColumn, chunk).eq('is_restricted', false)
+        : supabase.from(table).select(select).in(idColumn, chunk)
+      const { data, error } = await base.order(orderColumn).range(offset, offset + PAGE - 1)
+      if (error) throw new Error(error.message)
+      const batch = (data ?? []) as unknown as Array<Record<string, unknown>>
+      rows.push(...batch)
+      if (batch.length < PAGE) break
+      offset += PAGE
+    }
+  }
+  return rows
+}
+
 export async function POST(req: NextRequest) {
   const {
     baseUrl, apiKey, productIds, categoryMap, warehouseUid, formulaMap,
@@ -99,16 +134,12 @@ export async function POST(req: NextRequest) {
             if (error) throw new Error(error.message)
             allProducts.push(...(data as SrsProduct[]))
           }
-          for (let from = 0; from < ids.length; from += 500) {
-            const chunk = ids.slice(from, from + 500)
-            const { data, error } = await supabase
-              .from('srs_variants')
-              .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
-              .in('product_id', chunk)
-              .eq('is_restricted', false)
-            if (error) throw new Error(error.message)
-            allVariants.push(...(data as SrsVariant[]))
-          }
+          const srsVariantRows = await fetchVariantRows(
+            'srs_variants', 'product_id', ids,
+            'variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted',
+            'variant_id', true,
+          )
+          allVariants.push(...(srsVariantRows as unknown as SrsVariant[]))
         } else if (cfg.source === 'abc') {
           // ABC — family_ids are TEXT (e.g. "PFam_3359303"). Keep as strings for
           // the .in() filter, but strip non-digits when stamping into SrsProduct
@@ -144,15 +175,13 @@ export async function POST(req: NextRequest) {
             }
           }
           // ABC variants — fetch by product_id (family_id text), map item_number → variant_code.
-          for (let from = 0; from < keys.length; from += 500) {
-            const chunk = keys.slice(from, from + 500)
-            const { data, error } = await supabase
-              .from('abc_variants')
-              .select('variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted')
-              .in('product_id', chunk)
-              .eq('is_restricted', false)
-            if (error) throw new Error(error.message)
-            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+          {
+            const abcVariantRows = await fetchVariantRows(
+              'abc_variants', 'product_id', keys,
+              'variant_id, product_id, variant_code, color_name, size_name, variant_image_url, is_restricted',
+              'variant_id', true,
+            )
+            for (const r of abcVariantRows) {
               allVariants.push({
                 variant_id:        toNum(String(r.variant_id)),
                 product_id:        toNum(String(r.product_id)),
@@ -203,14 +232,13 @@ export async function POST(req: NextRequest) {
             return segs.find(s => UOM_MAP[s]) ?? segs[0] ?? null
           }
           const uomTally = new Map<number, Record<string, number>>()
-          for (let from = 0; from < keys.length; from += 500) {
-            const chunk = keys.slice(from, from + 500)
-            const { data, error } = await supabase
-              .from('qxo_variants')
-              .select('variant_sku, product_key, color, uom, image_url')
-              .in('product_key', chunk)
-            if (error) throw new Error(error.message)
-            for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+          {
+            const qxoVariantRows = await fetchVariantRows(
+              'qxo_variants', 'product_key', keys,
+              'variant_sku, product_key, color, uom, image_url',
+              'variant_sku', false,
+            )
+            for (const r of qxoVariantRows) {
               const pid = Number(String(r.product_key).replace(/\D/g, '')) || 0
               const uomCode = pickUomCode((r.uom as string) ?? '')
               if (uomCode) {
