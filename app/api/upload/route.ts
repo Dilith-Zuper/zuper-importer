@@ -367,9 +367,19 @@ export async function POST(req: NextRequest) {
           }
         }
         try {
-          const first = await fetchWithRetry(`${baseUrl}products?count=${IDEMPOTENCY_PAGE_SIZE}&page=1`, {
-            headers: zuperHeaders(apiKey),
-          })
+          // The product-list endpoint differs by Zuper data-center: some serve it at
+          // `product` (singular, e.g. us-west-1c), others at `products` (plural). The
+          // old bare-plural assumption silently 404'd on singular regions, so the scan
+          // found nothing existing and re-uploads POSTed duplicates. Resolve the
+          // working segment from page 1, then reuse it for the fan-out.
+          const listUrl = (segment: string, page: number) =>
+            `${baseUrl}${segment}?count=${IDEMPOTENCY_PAGE_SIZE}&page=${page}`
+          let listSegment = 'product'
+          let first = await fetchWithRetry(listUrl(listSegment, 1), { headers: zuperHeaders(apiKey) })
+          if (first.status === 404) {
+            listSegment = 'products'
+            first = await fetchWithRetry(listUrl(listSegment, 1), { headers: zuperHeaders(apiKey) })
+          }
           const firstRows = (first.json?.data ?? []) as Parameters<typeof ingestPage>[0]
           ingestPage(firstRows)
           const totalRecords: number | undefined = typeof first.json?.total_records === 'number' ? first.json.total_records : undefined
@@ -387,7 +397,7 @@ export async function POST(req: NextRequest) {
               const chunkEnd = Math.min(chunkStart + IDEMPOTENCY_SCAN_CONCURRENCY - 1, totalPages)
               const pageNums = Array.from({ length: chunkEnd - chunkStart + 1 }, (_, i) => chunkStart + i)
               const pages = await mapWithLimit(pageNums, IDEMPOTENCY_SCAN_CONCURRENCY, async (pageNumber) => {
-                const r = await fetchWithRetry(`${baseUrl}products?count=${IDEMPOTENCY_PAGE_SIZE}&page=${pageNumber}`, {
+                const r = await fetchWithRetry(listUrl(listSegment, pageNumber), {
                   headers: zuperHeaders(apiKey),
                 })
                 return { pageNumber, rows: (r.json?.data ?? []) as Parameters<typeof ingestPage>[0] }
