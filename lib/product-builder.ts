@@ -43,6 +43,41 @@ export interface PriceFallback {
   byCategory: Record<string, number>
 }
 
+/**
+ * Build the Zuper `option` block from a product's variants. Shingles get a
+ * customer-facing, mandatory "Color" selection; everything else (nails → "Mill",
+ * accessories → size codes) is a non-mandatory "Variant" label. Colors are
+ * deduped (excluding N/A and blanks) and capped at 50. Shared by the catalog
+ * upload (buildProductPayload) and the remap-options flow so both write options
+ * identically.
+ */
+export function buildOptionBlock(variants: SrsVariant[], productCategory: string) {
+  const colors = Array.from(new Set(
+    variants
+      .map(v => v.color_name?.trim())
+      .filter((c): c is string => !!c && c !== 'N/A' && c.toLowerCase() !== 'na')
+  ))
+
+  const cappedColors = colors.slice(0, 50)
+  const isShingles = productCategory === 'SHINGLES'
+
+  return cappedColors.length > 0 ? {
+    customer_selection: isShingles,
+    mandate_customer_selection: isShingles,
+    option_label: isShingles ? 'Color' : 'Variant',
+    option_values: cappedColors.map(c => ({
+      option_value: c,
+      option_image: '',
+      is_available: true,
+    })),
+  } : {
+    customer_selection: false,
+    mandate_customer_selection: false,
+    option_label: 'Color',
+    option_values: [] as Array<{ option_value: string; option_image: string; is_available: boolean }>,
+  }
+}
+
 function resolvePrice(product: SrsProduct, fallback?: PriceFallback): { price: number; estimated: boolean } {
   if (product.suggested_price != null && product.suggested_price > 0) {
     return { price: product.suggested_price, estimated: false }
@@ -65,35 +100,7 @@ export function buildProductPayload(
   productTierFieldUid: string,
   priceFallback?: PriceFallback,
 ) {
-  // Deduplicate colors — exclude N/A and blanks
-  const colors = Array.from(new Set(
-    variants
-      .map(v => v.color_name?.trim())
-      .filter((c): c is string => !!c && c !== 'N/A' && c.toLowerCase() !== 'na')
-  ))
-
-  const cappedColors = colors.slice(0, 50)
-
-  // Shingles have genuine color choices the customer must pick.
-  // Everything else (nails/fasteners → "Mill", accessories → size codes) is
-  // a variant label, not a customer-facing selection.
-  const isShingles = product.product_category === 'SHINGLES'
-
-  const option = cappedColors.length > 0 ? {
-    customer_selection: isShingles,
-    mandate_customer_selection: isShingles,
-    option_label: isShingles ? 'Color' : 'Variant',
-    option_values: cappedColors.map(c => ({
-      option_value: c,
-      option_image: '',
-      is_available: true,
-    })),
-  } : {
-    customer_selection: false,
-    mandate_customer_selection: false,
-    option_label: 'Color',
-    option_values: [],
-  }
+  const option = buildOptionBlock(variants, product.product_category)
 
   const image = ''
 
