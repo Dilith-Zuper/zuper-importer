@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { fetchWithRetry, zuperHeaders, chunks, sleep } from '@/lib/zuper-fetch'
+import { fetchVariantRows } from '@/lib/srs-variants'
+import { fetchAllZuperProducts } from '@/lib/zuper-products'
 import { buildProductPayload, type PriceFallback, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
 import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
@@ -13,50 +15,12 @@ import { catalogConfig } from '@/lib/catalog-source'
 import type { CatalogSource } from '@/types/wizard'
 
 const OPTION_GET_CONCURRENCY = 15
-const IDEMPOTENCY_SCAN_CONCURRENCY = 8
-const IDEMPOTENCY_PAGE_SIZE = 100
-const IDEMPOTENCY_MAX_PAGES = 250
 // Inter-batch pause — was 3000ms but fetchWithRetry handles 429s per-request,
 // so a global multi-second sleep just adds idle time. 500ms keeps us polite.
 const BATCH_PAUSE_MS = 500
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
-
-// PostgREST caps every response at 1000 rows. The product fetch is safe (one row
-// per id), but variant fetches are NOT — a 500-id chunk routinely holds several
-// thousand variants, so an un-paginated query silently drops everything past row
-// 1000 and the affected products upload with empty color/size options (looked like
-// "options missing on ~most products"). Page each id-chunk with .range(), ordered
-// by the variant PK (unique → deterministic, non-overlapping windows), until drained.
-async function fetchVariantRows(
-  table: string,
-  idColumn: string,
-  ids: (number | string)[],
-  select: string,
-  orderColumn: string,
-  restrictedFalse: boolean,
-): Promise<Array<Record<string, unknown>>> {
-  const PAGE = 1000
-  const rows: Array<Record<string, unknown>> = []
-  for (let from = 0; from < ids.length; from += 500) {
-    const chunk = ids.slice(from, from + 500)
-    let offset = 0
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const base = restrictedFalse
-        ? supabase.from(table).select(select).in(idColumn, chunk).eq('is_restricted', false)
-        : supabase.from(table).select(select).in(idColumn, chunk)
-      const { data, error } = await base.order(orderColumn).range(offset, offset + PAGE - 1)
-      if (error) throw new Error(error.message)
-      const batch = (data ?? []) as unknown as Array<Record<string, unknown>>
-      rows.push(...batch)
-      if (batch.length < PAGE) break
-      offset += PAGE
-    }
-  }
-  return rows
-}
 
 export async function POST(req: NextRequest) {
   const {
@@ -359,59 +323,14 @@ export async function POST(req: NextRequest) {
         // on accounts saturated with prior test products. First page tells us
         // total_records; remaining pages fan out at IDEMPOTENCY_SCAN_CONCURRENCY.
         const existingByProductId = new Map<string, string>()
-        const ingestPage = (rows: { product_uid?: string; product_id?: string | number }[]) => {
-          for (const p of rows) {
-            if (p.product_id && p.product_uid) {
-              existingByProductId.set(String(p.product_id), p.product_uid)
-            }
-          }
-        }
         try {
-          // The product-list endpoint differs by Zuper data-center: some serve it at
-          // `product` (singular, e.g. us-west-1c), others at `products` (plural). The
-          // old bare-plural assumption silently 404'd on singular regions, so the scan
-          // found nothing existing and re-uploads POSTed duplicates. Resolve the
-          // working segment from page 1, then reuse it for the fan-out.
-          const listUrl = (segment: string, page: number) =>
-            `${baseUrl}${segment}?count=${IDEMPOTENCY_PAGE_SIZE}&page=${page}`
-          let listSegment = 'product'
-          let first = await fetchWithRetry(listUrl(listSegment, 1), { headers: zuperHeaders(apiKey) })
-          if (first.status === 404) {
-            listSegment = 'products'
-            first = await fetchWithRetry(listUrl(listSegment, 1), { headers: zuperHeaders(apiKey) })
+          const existingRows = await fetchAllZuperProducts(baseUrl, apiKey, {
+            onProgress: (pageNumber, totalPages) => emit({ type: 'idempotency_scan_progress', pageNumber, totalPages }),
+            aborted: () => streamClosed,
+          })
+          for (const p of existingRows) {
+            if (p.product_id && p.product_uid) existingByProductId.set(String(p.product_id), p.product_uid)
           }
-          const firstRows = (first.json?.data ?? []) as Parameters<typeof ingestPage>[0]
-          ingestPage(firstRows)
-          const totalRecords: number | undefined = typeof first.json?.total_records === 'number' ? first.json.total_records : undefined
-
-          if (firstRows.length >= IDEMPOTENCY_PAGE_SIZE) {
-            const totalPages = totalRecords
-              ? Math.min(Math.ceil(totalRecords / IDEMPOTENCY_PAGE_SIZE), IDEMPOTENCY_MAX_PAGES)
-              : IDEMPOTENCY_MAX_PAGES   // unknown total — bounded fallback
-            emit({ type: 'idempotency_scan_progress', pageNumber: 1, totalPages })
-
-            // Pages 2..totalPages in chunks of IDEMPOTENCY_SCAN_CONCURRENCY so we can
-            // stop early when a chunk returns a short page (no total_records case).
-            let stop = false
-            for (let chunkStart = 2; chunkStart <= totalPages && !stop && !streamClosed; chunkStart += IDEMPOTENCY_SCAN_CONCURRENCY) {
-              const chunkEnd = Math.min(chunkStart + IDEMPOTENCY_SCAN_CONCURRENCY - 1, totalPages)
-              const pageNums = Array.from({ length: chunkEnd - chunkStart + 1 }, (_, i) => chunkStart + i)
-              const pages = await mapWithLimit(pageNums, IDEMPOTENCY_SCAN_CONCURRENCY, async (pageNumber) => {
-                const r = await fetchWithRetry(listUrl(listSegment, pageNumber), {
-                  headers: zuperHeaders(apiKey),
-                })
-                return { pageNumber, rows: (r.json?.data ?? []) as Parameters<typeof ingestPage>[0] }
-              })
-              // Ingest in page order so the map stays deterministic across re-runs.
-              pages.sort((a, b) => a.pageNumber - b.pageNumber)
-              for (const p of pages) {
-                ingestPage(p.rows)
-                if (p.rows.length < IDEMPOTENCY_PAGE_SIZE) stop = true
-              }
-              emit({ type: 'idempotency_scan_progress', pageNumber: chunkEnd, totalPages })
-            }
-          }
-
           emit({ type: 'idempotency_scan', existingCount: existingByProductId.size })
         } catch (e: unknown) {
           emit({ type: 'idempotency_scan', existingCount: 0, warning: `Existing-product scan failed: ${(e as Error).message}. Re-uploads may create duplicates.` })

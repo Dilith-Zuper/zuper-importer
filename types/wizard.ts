@@ -51,15 +51,63 @@ export interface ColorCatalogEntry {
   purchase_price: number | null
 }
 
+// ── Remap options flow (match existing Zuper products → SRS, write options) ──
+export type AppMode = 'home' | 'import' | 'remap'
+
+export type RemapConfidence = 'exact' | 'strong' | 'weak' | 'none'
+
+export interface RemapCandidate {
+  srsId: number
+  srsName: string
+  srsCategory: string
+  srsBrand: string
+  score: number
+  hasOptions: boolean
+  colors: string[]
+  sizes: string[]
+  optionsPreview: string
+}
+
+export interface RemapRow {
+  zuperUid: string
+  zuperName: string
+  zuperProductId: string | null
+  confidence: RemapConfidence
+  /** Matched by stamped SRS product_id rather than fuzzy scoring. */
+  fastPath: boolean
+  brand: string | null
+  /** Best candidate first, up to 3. Empty only if the catalog was empty. */
+  candidates: RemapCandidate[]
+}
+
+export interface RemapSelection {
+  zuperUid: string
+  srsId: number
+  srsCategory: string
+}
+
+export interface RemapSummary {
+  updated: number
+  failed: number
+  errors: { zuperUid: string; productName: string; message: string }[]
+}
+
 export interface WizardState {
+  // Top-level mode — landing page routes to the import wizard or the remap flow.
+  mode: AppMode
   // Steps: 1 Connect · 2 Source · 3 Trades · 4 Brands · 5 Lines · 6 Preview ·
   //        7 Validate · 8 Upload · 9 Done · 10 Vendor · 11 Templates
   step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
-  // Step 1 — Connect
+  // Step 1 — Connect (shared by both modes)
   companyLoginName: string
   apiKey: string
   baseUrl: string
   companyName: string
+  // Remap flow — 1 Connect · 2 Match · 3 Review · 4 Done
+  remapStep: 1 | 2 | 3 | 4
+  remapRows: RemapRow[]
+  remapSelections: RemapSelection[]
+  remapSummary: RemapSummary | null
   // Step 2 — Source (SRS / QXO + branch picker)
   catalogSource: CatalogSource
   selectedQxoBranch: QxoBranch | null

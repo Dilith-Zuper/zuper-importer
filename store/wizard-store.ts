@@ -1,11 +1,18 @@
 'use client'
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry, CatalogSource, QxoBranch } from '@/types/wizard'
+import type { WizardState, ValidationResult, TokenInfo, UploadError, BrandPackage, Trade, ProposalLineItem, ColorCatalogEntry, CatalogSource, QxoBranch, AppMode, RemapRow, RemapSelection, RemapSummary } from '@/types/wizard'
 
 interface WizardStore extends WizardState {
   setStep: (step: WizardState['step']) => void
+  setMode: (mode: AppMode) => void
+  goHome: () => void
   setConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
+  setRemapConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
+  setRemapStep: (step: WizardState['remapStep']) => void
+  setRemapRows: (rows: RemapRow[]) => void
+  setRemapSelections: (selections: RemapSelection[]) => void
+  setRemapSummary: (summary: RemapSummary) => void
   setCatalogSource: (source: CatalogSource) => void
   setSelectedQxoBranch: (branch: QxoBranch | null) => void
   setSelectedTrades: (trades: Trade[]) => void
@@ -33,11 +40,16 @@ interface WizardStore extends WizardState {
 }
 
 const initialState: WizardState = {
+  mode: 'home',
   step: 1,
   companyLoginName: '',
   apiKey: '',
   baseUrl: '',
   companyName: '',
+  remapStep: 1,
+  remapRows: [],
+  remapSelections: [],
+  remapSummary: null,
   catalogSource: 'srs',
   selectedQxoBranch: null,
   selectedTrades: ['roofing'],
@@ -70,8 +82,21 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
 
   setStep: (step) => set({ step }),
 
+  setMode: (mode) => set({ mode }),
+
+  // Return to the landing page and clear the (large, transient) remap match state.
+  goHome: () => set({ mode: 'home', remapStep: 1, remapRows: [], remapSelections: [], remapSummary: null }),
+
   setConnection: (companyLoginName, apiKey, baseUrl, companyName) =>
     set({ companyLoginName, apiKey, baseUrl, companyName, step: 2 }),
+
+  setRemapConnection: (companyLoginName, apiKey, baseUrl, companyName) =>
+    set({ companyLoginName, apiKey, baseUrl, companyName, remapStep: 2 }),
+
+  setRemapStep: (remapStep) => set({ remapStep }),
+  setRemapRows: (rows) => set({ remapRows: rows, remapStep: 3 }),
+  setRemapSelections: (selections) => set({ remapSelections: selections }),
+  setRemapSummary: (summary) => set({ remapSummary: summary, remapStep: 4 }),
 
   // Changing the catalog source clears every downstream selection — different
   // sources have totally different brand lists, product lines, and
@@ -142,15 +167,21 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   // refreshed tab requires re-entering it. companyLoginName is fine to persist.
   // Reset step to 1 on rehydrate so the user lands on Connect to re-enter the key.
   partialize: (state) => {
+    // Drop the API key (security: memory-only) and the large/transient remap
+    // match state (rows + selections) — they're re-fetched after reconnect.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { apiKey, ...rest } = state
+    const { apiKey, remapRows, remapSelections, ...rest } = state
     return rest
   },
   onRehydrateStorage: () => (state) => {
     if (state) {
       state.apiKey = ''
+      state.remapRows = []
+      state.remapSelections = []
       // If they had any progress, drop them at Connect to re-auth, then they can navigate forward.
       if (state.step > 1) state.step = 1
+      // Remap mode also requires the (memory-only) key, so send them back to its Connect step.
+      if (state.mode === 'remap') state.remapStep = 1
     }
   },
 }))
