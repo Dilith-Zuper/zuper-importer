@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { fetchWithRetry, zuperHeaders } from '@/lib/zuper-fetch'
 import { fetchSrsVariants } from '@/lib/srs-variants'
 import { buildOptionBlock, type SrsVariant } from '@/lib/product-builder'
+import { buildRemapPutProduct } from '@/lib/zuper-product-put'
 import { mapWithLimit } from '@/lib/limit'
 import type { RemapSelection } from '@/types/wizard'
 
@@ -66,8 +67,12 @@ export async function POST(req: NextRequest) {
             if (!existing) throw new Error('Product not found in Zuper')
             productName = existing.product_name ?? productName
 
+            // Zuper's GET nests product_category / location / uom / formula as
+            // objects and tags meta_data with a server `_id`; its PUT rejects
+            // that shape wholesale ("Error in Updating Product Details"). Flatten
+            // back to UID strings before swapping in the new option block.
             const payload = {
-              product: { ...existing, product_uid: sel.zuperUid, option },
+              product: buildRemapPutProduct(existing, sel.zuperUid, option),
             }
             const putRes = await fetchWithRetry(`${baseUrl}product/${sel.zuperUid}`, {
               method: 'PUT',
