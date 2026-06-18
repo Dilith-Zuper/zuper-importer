@@ -10,7 +10,7 @@ interface WizardStore extends WizardState {
   setConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
   setRemapConnection: (companyLoginName: string, apiKey: string, baseUrl: string, companyName: string) => void
   setRemapStep: (step: WizardState['remapStep']) => void
-  setRemapRows: (rows: RemapRow[]) => void
+  setRemapRows: (rows: RemapRow[], alreadyMapped?: number) => void
   setRemapSelections: (selections: RemapSelection[]) => void
   setRemapSummary: (summary: RemapSummary) => void
   setCatalogSource: (source: CatalogSource) => void
@@ -48,6 +48,7 @@ const initialState: WizardState = {
   companyName: '',
   remapStep: 1,
   remapRows: [],
+  remapAlreadyMapped: 0,
   remapSelections: [],
   remapSummary: null,
   catalogSource: 'srs',
@@ -85,7 +86,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
   setMode: (mode) => set({ mode }),
 
   // Return to the landing page and clear the (large, transient) remap match state.
-  goHome: () => set({ mode: 'home', remapStep: 1, remapRows: [], remapSelections: [], remapSummary: null }),
+  goHome: () => set({ mode: 'home', remapStep: 1, remapRows: [], remapAlreadyMapped: 0, remapSelections: [], remapSummary: null }),
 
   setConnection: (companyLoginName, apiKey, baseUrl, companyName) =>
     set({ companyLoginName, apiKey, baseUrl, companyName, step: 2 }),
@@ -94,7 +95,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
     set({ companyLoginName, apiKey, baseUrl, companyName, remapStep: 2 }),
 
   setRemapStep: (remapStep) => set({ remapStep }),
-  setRemapRows: (rows) => set({ remapRows: rows, remapStep: 3 }),
+  setRemapRows: (rows, alreadyMapped = 0) => set({ remapRows: rows, remapAlreadyMapped: alreadyMapped, remapStep: 3 }),
   setRemapSelections: (selections) => set({ remapSelections: selections }),
   setRemapSummary: (summary) => set({ remapSummary: summary, remapStep: 4 }),
 
@@ -177,6 +178,7 @@ export const useWizardStore = create<WizardStore>()(persist((set) => ({
     if (state) {
       state.apiKey = ''
       state.remapRows = []
+      state.remapAlreadyMapped = 0
       state.remapSelections = []
       // If they had any progress, drop them at Connect to re-auth, then they can navigate forward.
       if (state.step > 1) state.step = 1

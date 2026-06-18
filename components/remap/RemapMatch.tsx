@@ -55,7 +55,7 @@ export function RemapMatch() {
             if (data.type === 'score_progress') setScored(data.scored ?? 0)
             if (data.type === 'done') {
               if (data.error) { setError(data.error); return }
-              setRemapRows((data.rows ?? []) as RemapRow[])
+              setRemapRows((data.rows ?? []) as RemapRow[], data.alreadyMapped ?? 0)
             }
           }
         }

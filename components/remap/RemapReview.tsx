@@ -14,7 +14,7 @@ const CONF_META: Record<RemapConfidence, { label: string; pill: string; blurb: s
 const ORDER: RemapConfidence[] = ['exact', 'strong', 'weak', 'none']
 
 export function RemapReview() {
-  const { remapRows, companyName, setRemapSelections, setRemapStep } = useWizardStore()
+  const { remapRows, remapAlreadyMapped, companyName, setRemapSelections, setRemapStep } = useWizardStore()
 
   // Default: exact/strong checked on the best candidate; weak/none unchecked.
   const [state, setState] = useState<Record<string, RowState>>(() => {
@@ -75,6 +75,11 @@ export function RemapReview() {
           {remapRows.length.toLocaleString()} products from <span className="font-medium text-orange-500">{companyName}</span>.
           Confirm what gets the SRS options — only the color/size options are written, nothing else changes.
         </p>
+        {remapAlreadyMapped > 0 && (
+          <p className="text-sm text-gray-400 mt-1">
+            {remapAlreadyMapped.toLocaleString()} product{remapAlreadyMapped === 1 ? '' : 's'} already mapped — hidden.
+          </p>
+        )}
       </div>
 
       {ORDER.map(conf => {

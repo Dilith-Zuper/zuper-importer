@@ -106,6 +106,8 @@ export interface WizardState {
   // Remap flow — 1 Connect · 2 Match · 3 Review · 4 Done
   remapStep: 1 | 2 | 3 | 4
   remapRows: RemapRow[]
+  /** Count of products skipped because their SRS options are already mapped in Zuper. */
+  remapAlreadyMapped: number
   remapSelections: RemapSelection[]
   remapSummary: RemapSummary | null
   // Step 2 — Source (SRS / QXO + branch picker)

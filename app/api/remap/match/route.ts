@@ -6,11 +6,15 @@ import {
   prepareCatalog, matchProduct, isNonMaterial, cleanForDisplay,
   type SrsCatalogProduct, type ScoredMatch,
 } from '@/lib/srs-match'
-import type { SrsVariant } from '@/lib/product-builder'
+import { buildOptionBlock, type SrsVariant } from '@/lib/product-builder'
+import { fetchWithRetry, zuperHeaders } from '@/lib/zuper-fetch'
+import { mapWithLimit } from '@/lib/limit'
 import type { RemapCandidate, RemapRow } from '@/types/wizard'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+const OPTION_GET_CONCURRENCY = 10
 
 const SCORE_EMIT_EVERY = 25
 
@@ -104,6 +108,7 @@ export async function POST(req: NextRequest) {
           fastPath: boolean
           brand: string | null
           cands: ScoredMatch[]   // best..third, fast-path is single
+          existingOptions: string[]  // option_values already on the Zuper product
         }
         const pending: Pending[] = []
 
@@ -114,6 +119,14 @@ export async function POST(req: NextRequest) {
           const zuperName = String(p.product_name ?? '')
           const stampedId = p.product_id != null ? String(p.product_id) : null
 
+          // Option values already on the Zuper product — used below to skip
+          // products whose options are already mapped.
+          const existingOptions = Array.isArray(p.option?.option_values)
+            ? p.option!.option_values
+                .map(ov => (ov?.option_value ?? '').trim())
+                .filter(Boolean)
+            : []
+
           // Fast path — product already carries an SRS product_id (prior import).
           const stampedNum = stampedId && /^\d+$/.test(stampedId) ? Number(stampedId) : NaN
           const fastHit = Number.isFinite(stampedNum) ? srsById.get(stampedNum) : undefined
@@ -122,6 +135,7 @@ export async function POST(req: NextRequest) {
               zuperUid, zuperName, zuperProductId: stampedId,
               confidence: 'exact', fastPath: true, brand: fastHit.brandLc ?? null,
               cands: [{ prod: fastHit, score: 1 }],
+              existingOptions,
             })
           } else {
             const m = matchProduct({ name: zuperName }, products, brandVocab, srsHasBrand)
@@ -130,6 +144,7 @@ export async function POST(req: NextRequest) {
               zuperUid, zuperName, zuperProductId: stampedId,
               confidence: m.confidence, fastPath: false, brand: m.aBrand,
               cands,
+              existingOptions,
             })
           }
           if ((i + 1) % SCORE_EMIT_EVERY === 0 || i === candidates.length - 1) {
@@ -162,7 +177,64 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const rows: RemapRow[] = pending.map(row => ({
+        // ── 4b. Drop products whose options are already mapped ───────────────
+        // A product is "already mapped" when its best-matched SRS product has
+        // ≥1 option value and every one is already present (case-insensitive)
+        // on the Zuper product. Zuper is allowed to carry extra options.
+        const norm = (s: string) => s.trim().toLowerCase()
+
+        // The SRS option values we'd write for each row (only rows with a match
+        // that actually carries options can ever be "already mapped").
+        const srsOptsByRow = new Map<string, string[]>()
+        for (const row of pending) {
+          const best = row.cands[0]
+          if (!best) continue
+          const srsOpts = buildOptionBlock(
+            variantsByPid.get(best.prod.product_id) ?? [],
+            best.prod.product_category ?? '',
+          ).option_values.map(ov => ov.option_value)
+          if (srsOpts.length > 0) srsOptsByRow.set(row.zuperUid, srsOpts)
+        }
+
+        // The product-list scan may not include the option block on every data-
+        // center. For rows that could be "already mapped" (matched, has SRS
+        // options) but came back from the list with no options, read the real
+        // option block via a per-product GET — the same call the apply step
+        // trusts. If the list already supplied options, no GET is made.
+        const needGet = pending.filter(
+          row => srsOptsByRow.has(row.zuperUid) && row.existingOptions.length === 0,
+        )
+        if (needGet.length > 0) {
+          emit({ type: 'phase', phase: 'options', checking: needGet.length })
+          await mapWithLimit(needGet, OPTION_GET_CONCURRENCY, async (row) => {
+            if (streamClosed) return
+            try {
+              const r = await fetchWithRetry(`${baseUrl}product/${row.zuperUid}`, {
+                headers: zuperHeaders(apiKey),
+              })
+              const data = Array.isArray(r.json?.data) ? r.json.data[0] : r.json?.data
+              const vals = Array.isArray(data?.option?.option_values)
+                ? data.option.option_values
+                    .map((ov: { option_value?: string }) => (ov?.option_value ?? '').trim())
+                    .filter(Boolean)
+                : []
+              row.existingOptions = vals
+            } catch {
+              // Leave existingOptions empty → row stays listed (safe default).
+            }
+          })
+        }
+
+        let alreadyMapped = 0
+        const visible = pending.filter(row => {
+          const srsOpts = srsOptsByRow.get(row.zuperUid)
+          if (!srsOpts) return true   // no match / nothing to map → leave it listed
+          const have = new Set(row.existingOptions.map(norm))
+          if (srsOpts.every(v => have.has(norm(v)))) { alreadyMapped++; return false }
+          return true
+        })
+
+        const rows: RemapRow[] = visible.map(row => ({
           zuperUid: row.zuperUid,
           zuperName: row.zuperName,
           zuperProductId: row.zuperProductId,
@@ -179,7 +251,7 @@ export async function POST(req: NextRequest) {
         const tally = { exact: 0, strong: 0, weak: 0, none: 0 }
         for (const r of rows) tally[r.confidence]++
 
-        emit({ type: 'done', rows, excluded, tally })
+        emit({ type: 'done', rows, excluded, alreadyMapped, tally })
         controller.close()
       } catch (e: unknown) {
         emit({ type: 'done', error: (e as Error).message, rows: [] })
