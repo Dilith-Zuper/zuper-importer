@@ -43,38 +43,115 @@ export interface PriceFallback {
   byCategory: Record<string, number>
 }
 
+// Zuper hard-caps a product's option_values at 50.
+const OPTION_CAP = 50
+
+const realOpt = (s: string | null | undefined): s is string =>
+  !!s && !!s.trim() && !['n/a', 'na'].includes(s.trim().toLowerCase())
+
+export interface ResolvedOptions {
+  kind: 'color' | 'size' | 'composite' | null
+  option_label: string
+  customer_selection: boolean
+  mandate_customer_selection: boolean
+  values: string[]
+  /** The option_value a given variant maps to under the chosen axis (or null). Keeps
+   *  the vendor-catalog SKU↔option map aligned with whatever axis we loaded. */
+  labelOf: (v: SrsVariant) => string | null
+}
+
 /**
- * Build the Zuper `option` block from a product's variants. Shingles get a
- * customer-facing, mandatory "Color" selection; everything else (nails → "Mill",
- * accessories → size codes) is a non-mandatory "Variant" label. Colors are
- * deduped (excluding N/A and blanks) and capped at 50. Shared by the catalog
- * upload (buildProductPayload) and the remap-options flow so both write options
- * identically.
+ * Decide which option axis to load for a product from its variants — mirrors the
+ * standalone account backfill (product importer/backfill-account-options.js):
+ *   - both color & size vary → composite "Color — Size" from REAL pairs (no cartesian)
+ *   - only color varies       → color
+ *   - only size varies        → size
+ *   - neither varies, 1 color  → that single color (legacy behavior)
+ * Size is only considered when `includeSize` is true — QXO overloads `size_name` with
+ * its UOM, so the upload passes includeSize=false for QXO (color-only, unchanged).
+ * Shingles get a mandatory customer-facing "Color"; size/composite are non-mandatory.
+ * An overflowing composite (>50) falls back to the largest single axis that fits.
  */
-export function buildOptionBlock(variants: SrsVariant[], productCategory: string) {
-  const colors = Array.from(new Set(
-    variants
-      .map(v => v.color_name?.trim())
-      .filter((c): c is string => !!c && c !== 'N/A' && c.toLowerCase() !== 'na')
-  ))
-
-  const cappedColors = colors.slice(0, 50)
+export function resolveOptions(
+  variants: SrsVariant[],
+  productCategory: string,
+  includeSize = true,
+): ResolvedOptions {
+  const uniq = (arr: (string | null | undefined)[]) =>
+    Array.from(new Set(arr.filter(realOpt).map(s => s.trim())))
+  const colors = uniq(variants.map(v => v.color_name))
+  const sizes = includeSize ? uniq(variants.map(v => v.size_name)) : []
+  const cVary = colors.length > 1, sVary = sizes.length > 1
   const isShingles = productCategory === 'SHINGLES'
+  const cap = <T,>(a: T[]) => a.slice(0, OPTION_CAP)
 
-  return cappedColors.length > 0 ? {
+  const colorRes = (): ResolvedOptions => ({
+    kind: 'color',
+    option_label: isShingles ? 'Color' : 'Variant',
     customer_selection: isShingles,
     mandate_customer_selection: isShingles,
-    option_label: isShingles ? 'Color' : 'Variant',
-    option_values: cappedColors.map(c => ({
-      option_value: c,
+    values: cap(colors),
+    labelOf: v => (realOpt(v.color_name) ? v.color_name.trim() : null),
+  })
+  const sizeRes = (): ResolvedOptions => ({
+    kind: 'size', option_label: 'Size',
+    customer_selection: false, mandate_customer_selection: false,
+    values: cap(sizes),
+    labelOf: v => (realOpt(v.size_name) ? v.size_name.trim() : null),
+  })
+
+  if (includeSize && cVary && sVary) {
+    const seen = new Set<string>(), combos: string[] = []
+    const compositeLabel = (v: SrsVariant) =>
+      [v.color_name, v.size_name].filter(realOpt).map(s => s.trim()).join(' — ')
+    for (const v of variants) {
+      const label = compositeLabel(v)
+      if (!label || seen.has(label)) continue
+      seen.add(label); combos.push(label)
+    }
+    if (combos.length) {
+      if (combos.length <= OPTION_CAP) {
+        return {
+          kind: 'composite', option_label: 'Variant',
+          customer_selection: false, mandate_customer_selection: false,
+          values: combos,
+          labelOf: v => compositeLabel(v) || null,
+        }
+      }
+      // Overflow — load the largest single axis that fits; else the largest, capped.
+      const axes = [
+        { len: colors.length, res: colorRes },
+        { len: sizes.length, res: sizeRes },
+      ].sort((a, b) => b.len - a.len)
+      return (axes.find(a => a.len <= OPTION_CAP) ?? axes[0]).res()
+    }
+  }
+  if (cVary) return colorRes()
+  if (includeSize && sVary) return sizeRes()
+  if (colors.length >= 1) return colorRes()
+  return {
+    kind: null, option_label: 'Color',
+    customer_selection: false, mandate_customer_selection: false,
+    values: [], labelOf: () => null,
+  }
+}
+
+/**
+ * Build the Zuper `option` block from a product's variants. Thin wrapper over
+ * resolveOptions — shared by the catalog upload (buildProductPayload) and the
+ * remap-options flow so both write options identically.
+ */
+export function buildOptionBlock(variants: SrsVariant[], productCategory: string, includeSize = true) {
+  const r = resolveOptions(variants, productCategory, includeSize)
+  return {
+    customer_selection: r.customer_selection,
+    mandate_customer_selection: r.mandate_customer_selection,
+    option_label: r.option_label,
+    option_values: r.values.map(v => ({
+      option_value: v,
       option_image: '',
       is_available: true,
     })),
-  } : {
-    customer_selection: false,
-    mandate_customer_selection: false,
-    option_label: 'Color',
-    option_values: [] as Array<{ option_value: string; option_image: string; is_available: boolean }>,
   }
 }
 
@@ -99,8 +176,9 @@ export function buildProductPayload(
   formulaMap: Record<string, string>,
   productTierFieldUid: string,
   priceFallback?: PriceFallback,
+  includeSize = true,
 ) {
-  const option = buildOptionBlock(variants, product.product_category)
+  const option = buildOptionBlock(variants, product.product_category, includeSize)
 
   const image = ''
 
