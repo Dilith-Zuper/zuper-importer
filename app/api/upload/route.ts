@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { fetchWithRetry, zuperHeaders, chunks, sleep } from '@/lib/zuper-fetch'
 import { fetchVariantRows } from '@/lib/srs-variants'
 import { fetchAllZuperProducts } from '@/lib/zuper-products'
-import { buildProductPayload, type PriceFallback, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
+import { buildProductPayload, resolveOptions, type PriceFallback, type ResolvedOptions, type SrsProduct, type SrsVariant } from '@/lib/product-builder'
 import { buildServicePayload } from '@/lib/service-builder'
 import { SERVICE_CATALOG } from '@/lib/service-catalog'
 import { ACCESSORY_PRODUCT_IDS } from '@/lib/accessory-catalog'
@@ -301,11 +301,27 @@ export async function POST(req: NextRequest) {
           variantsByProduct.set(v.product_id, arr)
         }
 
-        const variantCodeByColor = new Map<number, Map<string, string>>()
-        for (const v of allVariants) {
-          if (!v.variant_code || !v.color_name) continue
-          if (!variantCodeByColor.has(v.product_id)) variantCodeByColor.set(v.product_id, new Map())
-          variantCodeByColor.get(v.product_id)!.set(v.color_name.trim(), v.variant_code)
+        // Resolve each product's option axis (color/size/composite) once, and key its
+        // SKUs by the SAME option_value label the product block will use, so the
+        // vendor-catalog SKU↔option mapping lines up regardless of axis. QXO overloads
+        // size_name with UOM, so size is excluded for QXO (color-only, unchanged).
+        const includeSize = cfg.source !== 'qxo'
+        const catByPid = new Map<number, string>()
+        for (const p of allProducts) catByPid.set(p.product_id, p.product_category)
+        const resolvedByPid = new Map<number, ResolvedOptions>()
+        const variantCodeByOption = new Map<number, Map<string, string>>()
+        for (const [pid, vars] of variantsByProduct) {
+          const ro = resolveOptions(vars, catByPid.get(pid) ?? '', includeSize)
+          resolvedByPid.set(pid, ro)
+          if (ro.values.length === 0) continue
+          const valueSet = new Set(ro.values)
+          const m = new Map<string, string>()
+          for (const v of vars) {
+            if (!v.variant_code) continue
+            const label = ro.labelOf(v)
+            if (label && valueSet.has(label)) m.set(label, v.variant_code)
+          }
+          variantCodeByOption.set(pid, m)
         }
 
         let uploaded = 0
@@ -353,6 +369,7 @@ export async function POST(req: NextRequest) {
               formulaMap,
               productTierFieldUid,
               priceFallback,
+              includeSize,
             )
             try {
               const existingUid = existingByProductId.get(String(product.product_id))
@@ -375,12 +392,11 @@ export async function POST(req: NextRequest) {
                 if (zuperUid) productIdMap[String(product.product_id)] = zuperUid
 
                 const productVariants = variantsByProduct.get(product.product_id) ?? []
-                const hasColors = productVariants.some(v => {
-                  const c = v.color_name?.trim()
-                  return c && c !== 'N/A' && c.toLowerCase() !== 'na'
-                })
+                // Any option block (color / size / composite) → fetch its option_uids
+                // for the vendor catalog; otherwise capture SKUs without an option link.
+                const hasOptions = (resolvedByPid.get(product.product_id)?.values.length ?? 0) > 0
 
-                if (zuperUid && hasColors) {
+                if (zuperUid && hasOptions) {
                   allNeedGet.push({ srsId: product.product_id, zuperUid, product })
                 } else if (productVariants.some(v => v.variant_code)) {
                   const variantEntries = productVariants
@@ -432,10 +448,10 @@ export async function POST(req: NextRequest) {
               const getProductData = Array.isArray(getRes.json?.data) ? getRes.json.data[0] : getRes.json?.data
               const optionValues: Array<{ option_uid: string; option_value: string }> = getProductData?.option?.option_values ?? []
               if (optionValues.length > 0) {
-                const colorMap = variantCodeByColor.get(srsId)
+                const optionMap = variantCodeByOption.get(srsId)
                 colorCatalogMap[String(srsId)] = optionValues.map(ov => ({
                   color_name: ov.option_value,
-                  variant_code: colorMap?.get(ov.option_value) ?? '',
+                  variant_code: optionMap?.get(ov.option_value) ?? '',
                   option_uid: ov.option_uid,
                   purchase_price: product.purchase_price,
                 }))
